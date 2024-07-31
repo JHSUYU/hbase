@@ -28,6 +28,7 @@ import static org.junit.Assert.assertTrue;
 import java.io.File;
 import java.io.IOException;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -123,6 +124,40 @@ public class TestFSUtils {
     byte [] data = new byte[dataSize];
     out.write(data, 0, dataSize);
     out.close();
+  }
+
+  @Test
+  public void testInvalidRootDirCausesInfiniteRetry() throws Exception {
+      Configuration conf = HBaseConfiguration.create();
+      final Path invalidRootDir = new Path("file:///invalid/root/dir");
+      FSUtils.setRootDir(conf, invalidRootDir);
+
+      final FileSystem fs = FileSystem.get(conf);
+
+      final AtomicBoolean infiniteLoop = new AtomicBoolean(false);
+
+      Thread testThread = new Thread(new Runnable() {
+          @Override
+          public void run() {
+              try {
+                  FSUtils.setVersion(fs, invalidRootDir, HConstants.FILE_SYSTEM_VERSION, 100, 100);
+              } catch (IOException e) {
+
+              }
+          }
+      });
+
+      testThread.start();
+
+      // Due to HBase-5003, we will enter infinite loop
+      Thread.sleep(5000);
+
+      if (testThread.isAlive()) {
+          infiniteLoop.set(true);
+          testThread.interrupt();
+      }
+
+      testThread.join(1000);
   }
 
   @Test public void testcomputeHDFSBlocksDistribution() throws Exception {
