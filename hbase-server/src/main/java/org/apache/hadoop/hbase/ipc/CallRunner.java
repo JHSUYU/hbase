@@ -16,6 +16,7 @@ package org.apache.hadoop.hbase.ipc;
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.channels.ClosedChannelException;
 
@@ -26,6 +27,7 @@ import org.apache.hadoop.hbase.CellScanner;
 import org.apache.hadoop.hbase.HBaseInterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.classification.InterfaceStability;
+import org.apache.hadoop.hbase.client.DryRunCheckerException;
 import org.apache.hadoop.hbase.exceptions.TimeoutIOException;
 import org.apache.hadoop.hbase.ipc.RpcServer.Call;
 import org.apache.hadoop.hbase.monitoring.MonitoredRPCHandler;
@@ -176,6 +178,107 @@ public class CallRunner {
       cleanup();
     }
   }
+
+    public void run$instrumentation() {
+        try {
+            if (!call.connection.channel.isOpen()) {
+                if (RpcServer.LOG.isDebugEnabled()) {
+                    RpcServer.LOG.debug(Thread.currentThread().getName() + ": skipped " + call);
+                }
+                return;
+            }
+            call.startTime = System.currentTimeMillis();
+            if (call.startTime > call.deadline) {
+                RpcServer.LOG.warn("Drop timeout call: " + call);
+                return;
+            }
+            this.status.setStatus("Setting up call");
+            this.status.setConnection(call.connection.getHostAddress(), call.connection.getRemotePort());
+            if (RpcServer.LOG.isTraceEnabled()) {
+                UserGroupInformation remoteUser = call.connection.ugi;
+                RpcServer.LOG.trace(call.toShortString() + " executing as " +
+                        ((remoteUser == null) ? "NULL principal" : remoteUser.getUserName()));
+            }
+            Throwable errorThrowable = null;
+            String error = null;
+            Pair<Message, CellScanner> resultPair = null;
+            RpcServer.CurCall.set(call);
+            TraceScope traceScope = null;
+            try {
+                if (!this.rpcServer.isStarted()) {
+                    InetSocketAddress address = rpcServer.getListenerAddress();
+                    throw new ServerNotRunningYetException("Server " +
+                            (address != null ? address : "(channel closed)") + " is not running yet");
+                }
+                if (call.tinfo != null) {
+                    traceScope = Trace.startSpan(call.toTraceString(), call.tinfo);
+                }
+                // make the call
+                resultPair = this.rpcServer.call(call.service, call.md, call.param, call.cellScanner,
+                        call.timestamp, this.status, call.startTime, call.timeout);
+            } catch (TimeoutIOException e) {
+                RpcServer.LOG.warn("Can not complete this request in time, drop it: " + call);
+                return;
+            } catch (Throwable e) {
+                RpcServer.LOG.debug(Thread.currentThread().getName() + ": " + call.toShortString(), e);
+                errorThrowable = e;
+                error = StringUtils.stringifyException(e);
+                if (e instanceof Error) {
+                    throw (Error) e;
+                }
+            } finally {
+                if (traceScope != null) {
+                    traceScope.close();
+                }
+                RpcServer.CurCall.set(null);
+                if (resultPair != null) {
+                    this.rpcServer.addCallSize(call.getSize() * -1);
+                    sucessful = true;
+                }
+            }
+            // Set the response
+            Message param = resultPair != null ? resultPair.getFirst() : null;
+            CellScanner cells = resultPair != null ? resultPair.getSecond() : null;
+            call.setResponse(param, cells, errorThrowable, error);
+            call.sendResponseIfReady();
+            this.status.markComplete("Sent response");
+            this.status.pause("Waiting for a call");
+            LOG.debug("this.rpcServer.getErrorHandler() = " + this.rpcServer.getErrorHandler());
+        } catch (OutOfMemoryError e) {
+            LOG.debug("Shadow OutOfMemoryError in server processing", e);
+            call.setResponse(null, null, new DryRunCheckerException("Error In Dry Run Checker Client Scan Operation"), "Error In Dry Run Checker Client Scan Operation");
+            // catch the IOException of call.sendResponseIfReady
+            try {
+                call.sendResponseIfReady();
+            } catch (IOException ex) {
+                LOG.debug("IOException", ex);
+            }
+            //remove the dangerous code Runtime.halt() in checkOOME()
+//            if (this.rpcServer.getErrorHandler() != null) {
+//                if (this.rpcServer.getErrorHandler().checkOOME(e)) {
+//                    RpcServer.LOG.info("Shadow "+Thread.currentThread().getName() + ": exiting on OutOfMemoryError");
+//                    return;
+//                }
+//            } else {
+//                // rethrow if no handler
+//                throw e;
+//            }
+        } catch (ClosedChannelException cce) {
+            InetSocketAddress address = rpcServer.getListenerAddress();
+            RpcServer.LOG.warn("Shadow " + Thread.currentThread().getName() + ": caught a ClosedChannelException, " +
+                    "this means that the server " + (address != null ? address : "(channel closed)") +
+                    " was processing a request but the client went away. The error message was: " +
+                    cce.getMessage());
+        } catch (Exception e) {
+            RpcServer.LOG.warn("Shadow " + Thread.currentThread().getName()
+                    + ": caught: " + StringUtils.stringifyException(e));
+        } finally {
+            if (!sucessful) {
+                this.rpcServer.addCallSize(call.getSize() * -1);
+            }
+            cleanup();
+        }
+    }
 
   /**
    * When we want to drop this call because of server is overloaded.

@@ -142,4 +142,8 @@ class Call {
   public long getStartTime() {
     return this.callStats.getStartTime();
   }
+
+  public Message getParam() {
+      return param;
+  }
 }

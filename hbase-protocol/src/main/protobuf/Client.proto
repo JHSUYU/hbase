@@ -297,6 +297,7 @@ message ScanRequest {
   optional bool renew = 10 [default = false];
   // if we have returned limit_of_rows rows to client, then close the scanner.
   optional uint32 limit_of_rows = 11 [default = 0];
+  optional bool is_retry = 12 [default = false];
 }
 
 /**

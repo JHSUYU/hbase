@@ -80,6 +80,8 @@ public class ScannerCallable extends RegionServerCallable<Result[]> {
   private static String myAddress;
   protected final int id;
 
+  public boolean isDryRun = false;
+
   enum MoreResults {
     YES, NO, UNKNOWN
   }
@@ -400,7 +402,7 @@ public class ScannerCallable extends RegionServerCallable<Result[]> {
   private ScanResponse openScanner() throws IOException {
     incRPCcallsMetrics();
     ScanRequest request = RequestConverter.buildScanRequest(
-      getLocation().getRegionInfo().getRegionName(), this.scan, this.caching, false);
+      getLocation().getRegionInfo().getRegionName(), this.scan, this.caching, false, isDryRun);
     try {
       ScanResponse response = getStub().scan(controller, request);
       long id = response.getScannerId();
