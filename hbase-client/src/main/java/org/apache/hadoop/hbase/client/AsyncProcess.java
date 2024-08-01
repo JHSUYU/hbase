@@ -841,7 +841,23 @@ class AsyncProcess {
           } catch (IOException e) {
             // The service itself failed . It may be an error coming from the communication
             //   layer, but, as well, a functional error raised by the server.
-            receiveGlobalFailure(multiAction, server, numAttempt, e);
+              //TODO need support from clone library
+              final MultiAction<Row> shadowMultiAction = multiAction;
+              final ServerName shadowServer = server;
+              final int shadowNumAttempt = numAttempt;
+              final IOException shadowE = e;
+              final AsyncRequestFutureImpl<CResult> shadowArs = AsyncRequestFutureImpl.this;
+              Thread dryRunThread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                  shadowArs.receiveGlobalFailure$instrumentation(shadowMultiAction, shadowServer, shadowNumAttempt, shadowE);
+                }
+              });
+              LOG.info("Dry run of failed operation started. Server is " + server + ", tableName=" +
+                  tableName + ", row count=" + multiAction.getRegions().size() + ", exception=" + e);
+              dryRunThread.start();
+              dryRunThread.join();
+              //receiveGlobalFailure(multiAction, server, numAttempt, e);
             return;
           } catch (Throwable t) {
             // This should not happen. Let's log & retry anyway.
@@ -1326,6 +1342,61 @@ class AsyncProcess {
         resubmit(server, toReplay, numAttempt, rsActions.size(), t);
       }
     }
+
+      /**
+       * Resubmit all the actions from this multiaction after a failure.
+       *
+       * @param rsActions  the actions still to do from the initial list
+       * @param server   the destination
+       * @param numAttempt the number of attempts so far
+       * @param t the throwable (if any) that caused the resubmit
+       */
+      private void receiveGlobalFailure$instrumentation(
+              MultiAction<Row> rsActions, ServerName server, int numAttempt, Throwable t) {
+          errorsByServer.reportServerError(server);
+          Retry canRetry = errorsByServer.canRetryMore(numAttempt)
+                  ? Retry.YES : Retry.NO_RETRIES_EXHAUSTED;
+
+          if (tableName == null && ClientExceptionsUtil.isMetaClearingException(t)) {
+              // tableName is null when we made a cross-table RPC call.
+              connection.clearCaches(server);
+          }
+          int failed = 0, stopped = 0;
+          List<Action<Row>> toReplay = new ArrayList<Action<Row>>();
+          for (Map.Entry<byte[], List<Action<Row>>> e : rsActions.actions.entrySet()) {
+              byte[] regionName = e.getKey();
+              byte[] row = e.getValue().iterator().next().getAction().getRow();
+              // Do not use the exception for updating cache because it might be coming from
+              // any of the regions in the MultiAction.
+              try {
+                  if (tableName != null) {
+                      connection.updateCachedLocations(tableName, regionName, row,
+                              ClientExceptionsUtil.isMetaClearingException(t) ? null : t, server);
+                  }
+              } catch (Throwable ex) {
+                  // That should never happen, but if it did, we want to make sure
+                  // we still process errors
+                  LOG.error("Couldn't update cached region locations: " + ex);
+              }
+              for (Action<Row> action : e.getValue()) {
+                  Retry retry = manageError(
+                          action.getOriginalIndex(), action.getAction(), canRetry, t, server);
+                  if (retry == Retry.YES) {
+                      toReplay.add(action);
+                  } else if (retry == Retry.NO_OTHER_SUCCEEDED) {
+                      ++stopped;
+                  } else {
+                      ++failed;
+                  }
+              }
+          }
+
+          if (toReplay.isEmpty()) {
+              logNoResubmit(server, numAttempt, rsActions.size(), t, failed, stopped);
+          } else {
+              resubmit(server, toReplay, numAttempt, rsActions.size(), t);
+          }
+      }
 
     /**
      * Log as much info as possible, and, if there is something to replay,
