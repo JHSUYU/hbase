@@ -402,6 +402,68 @@ public abstract class TestBasicWALEntryStream extends WALEntryStreamTestBase {
     assertSame(WALEntryBatch.NO_MORE_DATA, reader.take());
   }
 
+  @Test
+  public void testDryRunNPEInReplicationSourceWALReader() throws Exception {
+    appendToLogAndSync();
+    System.out.println("Failure Recovery, appendToLogAndSync done");
+    Path emptyWalPath = getQueue().peek();
+    System.out.println("Failure Recovery, emptyWalPath: " + emptyWalPath);
+    log.rollWriter();
+    System.out.println("Failure Recovery, log.rollWriter done");
+
+    // Wait for the previous WAL to be closed
+    TEST_UTIL.waitFor(5000, () -> {
+      try {
+        return fs.getFileStatus(emptyWalPath).getLen() > 0;
+      } catch (IOException e) {
+        return false;
+      }
+    });
+    System.out.println("Failure Recovery, fs.getFileStatus(emptyWalPath).getLen() > 0 done");
+
+    // Simulate failed close by replacing the file with an empty one
+    fs.delete(emptyWalPath, false);
+    try (FSDataOutputStream out = fs.create(emptyWalPath)) {
+      // Create an empty file
+    }
+    System.out.println("Failure Recovery, fs.create(emptyWalPath) done");
+
+    // Move the empty WAL to oldWALs directory
+    Path oldWALsDir = new Path(fs.getWorkingDirectory(), "oldWALs");
+    fs.mkdirs(oldWALsDir);
+    Path archivedPath = new Path(oldWALsDir, emptyWalPath.getName());
+    fs.rename(emptyWalPath, archivedPath);
+
+    System.out.println("Failure Recovery, fs.rename(emptyWalPath, archivedPath) done");
+
+    // Configure and start ReplicationSourceWALReader
+    Configuration conf = new Configuration(CONF);
+    conf.setInt("replication.source.maxretriesmultiplier", 1);
+    conf.setBoolean("replication.source.eof.autorecovery", false);
+
+    ReplicationSource source = mockReplicationSource(false, conf);
+    when(source.isPeerEnabled()).thenReturn(true);
+
+        ReplicationSourceWALReader reader = new ReplicationSourceWALReader(
+          fs, conf, logQueue, 0, getDummyFilter(), source, fakeWalGroupId);
+
+        // Start the reader thread
+        reader.start();
+
+        // Wait for the NPE or timeout
+        final AtomicBoolean npeOccurred = new AtomicBoolean(false);
+        Thread.UncaughtExceptionHandler handler = (t, e) -> {
+          if (e instanceof NullPointerException) {
+            npeOccurred.set(true);
+          }
+        };
+        reader.setUncaughtExceptionHandler(handler);
+
+        TEST_UTIL.waitFor(10000, () -> !reader.isAlive() || npeOccurred.get());
+
+        assertTrue("Expected NullPointerException did not occur", npeOccurred.get());
+  }
+
   // Testcase for HBASE-20206
   @Test
   public void testReplicationSourceWALReaderWrongPosition() throws Exception {

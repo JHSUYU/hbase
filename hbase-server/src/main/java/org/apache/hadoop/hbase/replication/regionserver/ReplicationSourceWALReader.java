@@ -26,6 +26,8 @@ import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -60,6 +62,10 @@ class ReplicationSourceWALReader extends Thread {
   private final Configuration conf;
   private final WALEntryFilter filter;
   private final ReplicationSource source;
+
+  public static int NULL_POINTER_COUNT = 1;
+
+  public Lock lock = new ReentrantLock();
 
   @InterfaceAudience.Private
   final BlockingQueue<WALEntryBatch> entryBatchQueue;
@@ -130,7 +136,7 @@ class ReplicationSourceWALReader extends Thread {
       try (WALEntryStream entryStream =
         new WALEntryStream(logQueue, conf, currentPosition, source.getWALFileLengthProvider(),
           source.getServerWALsBelongTo(), source.getSourceMetrics(), walGroupId)) {
-        while (isReaderRunning()) { // loop here to keep reusing stream while we can
+        while (isReaderRunning()) {// loop here to keep reusing stream while we can
           batch = null;
           if (!source.isPeerEnabled()) {
             waitingPeerEnabled.set(true);
@@ -170,6 +176,14 @@ class ReplicationSourceWALReader extends Thread {
               // acquired in ReplicationSourceWALReader.acquireBufferQuota.
               this.releaseBufferQuota(batch);
             }
+            LOG.info("Failure Recovery, inject NullPointerException to trigger retry");
+            lock.lock();
+            if(NULL_POINTER_COUNT == 1) {
+              NULL_POINTER_COUNT--;
+              lock.unlock();
+              throw new NullPointerException();
+            }
+            lock.unlock();
           }
         }
       } catch (WALEntryFilterRetryableException | IOException e) { // stream related
