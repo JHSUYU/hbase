@@ -70,6 +70,7 @@ public class WALProcedureStore extends ProcedureStoreBase {
   public interface LeaseRecovery {
     void recoverFileLease(FileSystem fs, Path path) throws IOException;
   }
+  public boolean isDryRun = false;
 
   public static final String MAX_RETRIES_BEFORE_ROLL_CONF_KEY =
     "hbase.procedure.store.wal.max.retries.before.roll";
@@ -176,6 +177,18 @@ public class WALProcedureStore extends ProcedureStoreBase {
     this.conf = conf;
     this.walDir = walDir;
     this.leaseRecovery = leaseRecovery;
+  }
+
+  public void checkCurrentLogs() {
+      try {
+          FileStatus[] status = fs.listStatus(walDir);
+          LOG.info("walDir is " + walDir.toString());
+          for (FileStatus fileStatus : status) {
+              LOG.info("Failure Recovery checkCurrentLogs " + fileStatus.getPath().getName());
+          }
+      } catch(IOException e) {
+          LOG.error("Error while checking current logs", e);
+      }
   }
 
   @Override
@@ -588,6 +601,7 @@ public class WALProcedureStore extends ProcedureStoreBase {
     lock.lock();
     try {
       while (isRunning()) {
+        checkCurrentLogs();
         try {
           // Wait until new data is available
           if (slotIndex == 0) {

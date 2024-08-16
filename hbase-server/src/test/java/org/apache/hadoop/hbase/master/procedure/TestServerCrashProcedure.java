@@ -106,12 +106,16 @@ public class TestServerCrashProcedure {
       HRegionServer hrs = this.util.getHBaseCluster().getRegionServer(0);
       boolean carryingMeta = (master.getAssignmentManager().isCarryingMeta(hrs.getServerName()) ==
           AssignmentManager.ServerHostRegion.HOSTING_REGION);
+      if(carryingMeta){
+          hrs = this.util.getHBaseCluster().getRegionServer(1);
+      }
       this.util.getHBaseCluster().killRegionServer(hrs.getServerName());
       hrs.join();
       // Wait until the expiration of the server has arrived at the master. We won't process it
       // by queuing a ServerCrashProcedure because we have disabled crash processing... but wait
       // here so ServerManager gets notice and adds expired server to appropriate queues.
       while (!master.getServerManager().isServerDead(hrs.getServerName())) Threads.sleep(10);
+      System.out.println("Server is dead: " + hrs.getServerName());
       // Now, reenable processing else we can't get a lock on the ServerCrashProcedure.
       master.setServerCrashProcessingEnabled(true);
       // Do some of the master processing of dead servers so when SCP runs, it has expected 'state'.

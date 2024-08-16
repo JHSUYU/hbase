@@ -147,10 +147,13 @@ public class ZKSplitLogManagerCoordination extends ZooKeeperListener implements
   public int remainingTasksInCoordination() {
     int count = 0;
     try {
+      String path = null;
+      LOG.info("In remainingTasksInCoordination, the splitLogZnode is " + watcher.splitLogZNode);
       List<String> tasks = ZKUtil.listChildrenNoWatch(watcher, watcher.splitLogZNode);
       if (tasks != null) {
         int listSize = tasks.size();
         for (int i = 0; i < listSize; i++) {
+           LOG.info("In remainingTasksInCoordination, the task is " + tasks.get(i));
           if (!ZKSplitLog.isRescanNode(tasks.get(i))) {
             count++;
           }
@@ -422,8 +425,30 @@ public class ZKSplitLogManagerCoordination extends ZooKeeperListener implements
 
   private void createNode(String path, Long retry_count) {
     SplitLogTask slt = new SplitLogTask.Unassigned(details.getServerName(), getRecoveryMode());
+    try{
+        int res = ZKUtil.checkExists(this.watcher, this.watcher.splitLogZNode);
+        LOG.info("ZKUtil.checkExists returned " + res);
+        if(res == -1){
+            ZKUtil.createWithParents(watcher, this.watcher.splitLogZNode);
+        }
+        res = ZKUtil.checkExists(this.watcher, this.watcher.splitLogZNode);
+        assert res != -1;
+        LOG.info("created splitLogZNode " + this.watcher.splitLogZNode);
+
+    } catch (KeeperException ke) {
+      LOG.warn("Failed to check existence of task node " + path + " will retry", ke);
+      return;
+    }
+
     ZKUtil.asyncCreate(this.watcher, path, slt.toByteArray(), new CreateAsyncCallback(),
       retry_count);
+//    try{
+//      ZKUtil.createWithParents(watcher, path, slt.toByteArray());
+//    } catch (KeeperException ke) {
+//      LOG.warn("Failed to create task node " + path + " will retry", ke);
+//      return;
+//    }
+    LOG.info("Failure Recovery, created path=" + path + " with data=" + slt.toString());
     SplitLogCounters.tot_mgr_node_create_queued.incrementAndGet();
     return;
   }
@@ -871,6 +896,93 @@ public class ZKSplitLogManagerCoordination extends ZooKeeperListener implements
       }
     }
   }
+
+    public void setRecoveryMode$instrumentation(boolean isForInitialization) throws IOException {
+        synchronized(this) {
+            if (this.isDrainingDone) {
+                // when there is no outstanding splitlogtask after master start up, we already have up to
+                // date recovery mode
+                return;
+            }
+        }
+        if (this.watcher == null) {
+            // when watcher is null(testing code) and recovery mode can only be LOG_SPLITTING
+            synchronized(this) {
+                this.isDrainingDone = true;
+                this.recoveryMode = RecoveryMode.LOG_SPLITTING;
+            }
+            return;
+        }
+        boolean hasSplitLogTask = false;
+        boolean hasRecoveringRegions = false;
+        RecoveryMode previousRecoveryMode = RecoveryMode.UNKNOWN;
+        RecoveryMode recoveryModeInConfig =
+                (isDistributedLogReplay(conf)) ? RecoveryMode.LOG_REPLAY : RecoveryMode.LOG_SPLITTING;
+
+        // Firstly check if there are outstanding recovering regions
+        try {
+            List<String> regions = ZKUtil.listChildrenNoWatch(watcher, watcher.recoveringRegionsZNode);
+            if (regions != null && !regions.isEmpty()) {
+                hasRecoveringRegions = true;
+                previousRecoveryMode = RecoveryMode.LOG_REPLAY;
+            }
+            if (previousRecoveryMode == RecoveryMode.UNKNOWN) {
+                // Secondly check if there are outstanding split log task
+                List<String> tasks = listSplitLogTasks();
+                if (!tasks.isEmpty()) {
+                    hasSplitLogTask = true;
+                    if (isForInitialization) {
+                        // during initialization, try to get recovery mode from splitlogtask
+                        int listSize = tasks.size();
+                        for (int i = 0; i < listSize; i++) {
+                            String task = tasks.get(i);
+                            try {
+                                byte[] data =
+                                        ZKUtil.getData(this.watcher, ZKUtil.joinZNode(watcher.dryRunSplitLogZNode, task));
+                                if (data == null) continue;
+                                SplitLogTask slt = SplitLogTask.parseFrom(data);
+                                previousRecoveryMode = slt.getMode();
+                                if (previousRecoveryMode == RecoveryMode.UNKNOWN) {
+                                    // created by old code base where we don't set recovery mode in splitlogtask
+                                    // we can safely set to LOG_SPLITTING because we're in master initialization code
+                                    // before SSH is enabled & there is no outstanding recovering regions
+                                    previousRecoveryMode = RecoveryMode.LOG_SPLITTING;
+                                }
+                                break;
+                            } catch (DeserializationException e) {
+                                LOG.warn("Failed parse data for znode " + task, e);
+                            } catch (InterruptedException e) {
+                                throw new InterruptedIOException();
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (KeeperException e) {
+            throw new IOException(e);
+        }
+
+        synchronized (this) {
+            if (this.isDrainingDone) {
+                return;
+            }
+            if (!hasSplitLogTask && !hasRecoveringRegions) {
+                this.isDrainingDone = true;
+                this.recoveryMode = recoveryModeInConfig;
+                return;
+            } else if (!isForInitialization) {
+                // splitlogtask hasn't drained yet, keep existing recovery mode
+                return;
+            }
+
+            if (previousRecoveryMode != RecoveryMode.UNKNOWN) {
+                this.isDrainingDone = (previousRecoveryMode == recoveryModeInConfig);
+                this.recoveryMode = previousRecoveryMode;
+            } else {
+                this.recoveryMode = recoveryModeInConfig;
+            }
+        }
+    }
 
   /**
    * Returns if distributed log replay is turned on or not

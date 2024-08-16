@@ -398,6 +398,8 @@ public class HRegionServer extends HasThread implements
   // Log Splitting Worker
   private SplitLogWorker splitLogWorker;
 
+  private SplitLogWorker shadowSplitLogWorker;
+
   // A sleeper that sleeps for msgInterval.
   protected final Sleeper sleeper;
 
@@ -1049,6 +1051,9 @@ public class HRegionServer extends HasThread implements
     if (this.leases != null) this.leases.closeAfterLeasesExpire();
     if (this.splitLogWorker != null) {
       splitLogWorker.stop();
+    }
+    if(this.shadowSplitLogWorker != null){
+        shadowSplitLogWorker.stop();
     }
     if (this.infoServer != null) {
       LOG.info("Stopping infoServer");
@@ -1854,6 +1859,9 @@ public class HRegionServer extends HasThread implements
     sinkConf.setInt("hbase.client.serverside.retries.multiplier", 1);
     this.splitLogWorker = new SplitLogWorker(this, sinkConf, this, this, walFactory);
     splitLogWorker.start();
+    this.shadowSplitLogWorker = new SplitLogWorker(this, sinkConf, this, this, walFactory);
+    this.shadowSplitLogWorker.isDryRun = true;
+    this.shadowSplitLogWorker.start();
   }
 
   /**

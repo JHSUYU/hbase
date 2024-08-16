@@ -49,6 +49,7 @@ import javax.servlet.http.HttpServletResponse;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.ChoreService;
 import org.apache.hadoop.hbase.ClusterStatus;
@@ -448,6 +449,7 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
   public HMaster(final Configuration conf, CoordinatedStateManager csm)
       throws IOException, KeeperException, InterruptedException {
     super(conf, csm);
+    LOG.info("zookeeper checkSplitZNode=" + zooKeeper.checkSplitZNode());
     this.rsFatals = new MemoryBoundedLogMessageBuffer(
       conf.getLong("hbase.master.buffer.for.rs.fatals", 1*1024*1024));
 
@@ -724,9 +726,10 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
    * @throws KeeperException
    * @throws CoordinatedStateException
    */
+
+
   private void finishActiveMasterInitialization(MonitoredTask status)
       throws IOException, InterruptedException, KeeperException, CoordinatedStateException {
-
     activeMaster = true;
     Thread zombieDetector = new Thread(new InitializationMonitor(this),
         "ActiveMasterInitializationMonitor-" + System.currentTimeMillis());
@@ -949,6 +952,233 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
           (System.currentTimeMillis() - start) / 1000) + " seconds");
     }
   }
+
+    private void finishActiveMasterInitialization$instrumentation(MonitoredTask status)
+            throws IOException, InterruptedException, KeeperException, CoordinatedStateException {
+        activeMaster = true;
+        Thread zombieDetector = new Thread(new InitializationMonitor(this),
+                "ActiveMasterInitializationMonitor-" + System.currentTimeMillis());
+        zombieDetector.start();
+
+        /*
+         * We are active master now... go initialize components we need to run.
+         * Note, there may be dross in zk from previous runs; it'll get addressed
+         * below after we determine if cluster startup or failover.
+         */
+
+        status.setStatus("Initializing Master file system");
+
+        this.masterActiveTime = System.currentTimeMillis();
+        // TODO: Do this using Dependency Injection, using PicoContainer, Guice or Spring.
+        this.fileSystemManager = new MasterFileSystem(this, this);
+
+        // enable table descriptors cache
+        this.tableDescriptors.setCacheOn();
+        // set the META's descriptor to the correct replication
+        this.tableDescriptors.get(TableName.META_TABLE_NAME).setRegionReplication(
+                conf.getInt(HConstants.META_REPLICAS_NUM, HConstants.DEFAULT_META_REPLICA_NUM));
+        // warm-up HTDs cache on master initialization
+        if (preLoadTableDescriptors) {
+            status.setStatus("Pre-loading table descriptors");
+            this.tableDescriptors.getAll();
+        }
+
+        // publish cluster ID
+        status.setStatus("Publishing Cluster ID in ZooKeeper");
+        ZKClusterId.setClusterId(this.zooKeeper, fileSystemManager.getClusterId());
+        this.initLatch.countDown();
+        this.serverManager = createServerManager(this, this);
+
+        setupClusterConnection();
+
+        // Invalidate all write locks held previously
+        this.tableLockManager.reapWriteLocks();
+
+        status.setStatus("Initializing ZK system trackers");
+        initializeZKBasedSystemTrackers();
+
+        // This is for backwards compatibility
+        // See HBASE-11393
+        status.setStatus("Update TableCFs node in ZNode");
+        TableCFsUpdater tableCFsUpdater = new TableCFsUpdater(zooKeeper,
+                conf, this.clusterConnection);
+        tableCFsUpdater.update();
+
+        // initialize master side coprocessors before we start handling requests
+        status.setStatus("Initializing master coprocessors");
+        this.cpHost = new MasterCoprocessorHost(this, this.conf);
+
+        // start up all service threads.
+        status.setStatus("Initializing master service threads");
+        startServiceThreads$instrumentation();
+
+        // Wake up this server to check in
+        sleeper.skipSleepCycle();
+
+        // Wait for region servers to report in
+        this.serverManager.waitForRegionServers(status);
+        // Check zk for region servers that are up but didn't register
+        for (ServerName sn: this.regionServerTracker.getOnlineServers()) {
+            // The isServerOnline check is opportunistic, correctness is handled inside
+            if (!this.serverManager.isServerOnline(sn)
+                    && serverManager.checkAndRecordNewServer(sn, ServerLoad.EMPTY_SERVERLOAD)) {
+                LOG.info("Registered server found up in zk but who has not yet reported in: " + sn);
+            }
+        }
+
+        // get a list for previously failed RS which need log splitting work
+        // we recover hbase:meta region servers inside master initialization and
+        // handle other failed servers in SSH in order to start up master node ASAP
+        Set<ServerName> previouslyFailedServers =
+                this.fileSystemManager.getFailedServersFromLogFolders();
+
+        // log splitting for hbase:meta server
+        ServerName oldMetaServerLocation = metaTableLocator.getMetaRegionLocation(this.getZooKeeper());
+        if (oldMetaServerLocation != null && previouslyFailedServers.contains(oldMetaServerLocation)) {
+            splitMetaLogBeforeAssignment(oldMetaServerLocation);
+            // Note: we can't remove oldMetaServerLocation from previousFailedServers list because it
+            // may also host user regions
+        }
+        Set<ServerName> previouslyFailedMetaRSs = getPreviouselyFailedMetaServersFromZK();
+        // need to use union of previouslyFailedMetaRSs recorded in ZK and previouslyFailedServers
+        // instead of previouslyFailedMetaRSs alone to address the following two situations:
+        // 1) the chained failure situation(recovery failed multiple times in a row).
+        // 2) master get killed right before it could delete the recovering hbase:meta from ZK while the
+        // same server still has non-meta wals to be replayed so that
+        // removeStaleRecoveringRegionsFromZK can't delete the stale hbase:meta region
+        // Passing more servers into splitMetaLog is all right. If a server doesn't have hbase:meta wal,
+        // there is no op for the server.
+        previouslyFailedMetaRSs.addAll(previouslyFailedServers);
+
+        this.initializationBeforeMetaAssignment = true;
+
+        // Wait for regionserver to finish initialization.
+        if (BaseLoadBalancer.tablesOnMaster(conf)) {
+            waitForServerOnline();
+        }
+
+        //initialize load balancer
+        this.balancer.setMasterServices(this);
+        this.balancer.setClusterStatus(getClusterStatusWithoutCoprocessor());
+        this.balancer.initialize();
+
+        // Check if master is shutting down because of some issue
+        // in initializing the regionserver or the balancer.
+        if (isStopped()) return;
+
+        // Make sure meta assigned before proceeding.
+        status.setStatus("Assigning Meta Region");
+        assignMeta(status, previouslyFailedMetaRSs, HRegionInfo.DEFAULT_REPLICA_ID);
+        // check if master is shutting down because above assignMeta could return even hbase:meta isn't
+        // assigned when master is shutting down
+        if (isStopped()) return;
+
+        status.setStatus("Submitting log splitting work for previously failed region servers");
+        // Master has recovered hbase:meta region server and we put
+        // other failed region servers in a queue to be handled later by SSH
+        for (ServerName tmpServer : previouslyFailedServers) {
+            this.serverManager.processDeadServer(tmpServer, true);
+        }
+
+        // Update meta with new PB serialization if required. i.e migrate all HRI to PB serialization
+        // in meta. This must happen before we assign all user regions or else the assignment will fail.
+        if (this.conf.getBoolean("hbase.MetaMigrationConvertingToPB", true)) {
+            MetaMigrationConvertingToPB.updateMetaIfNecessary(this);
+        }
+
+        // Fix up assignment manager status
+        status.setStatus("Starting assignment manager");
+        this.assignmentManager.joinCluster();
+
+        // set cluster status again after user regions are assigned
+        this.balancer.setClusterStatus(getClusterStatusWithoutCoprocessor());
+
+        // Start balancer and meta catalog janitor after meta and regions have been assigned.
+        status.setStatus("Starting balancer and catalog janitor");
+        this.clusterStatusChore = new ClusterStatusChore(this, balancer);
+        getChoreService().scheduleChore(clusterStatusChore);
+        this.balancerChore = new BalancerChore(this);
+        getChoreService().scheduleChore(balancerChore);
+        this.normalizerChore = new RegionNormalizerChore(this);
+        getChoreService().scheduleChore(normalizerChore);
+        this.catalogJanitorChore = new CatalogJanitor(this, this);
+        getChoreService().scheduleChore(catalogJanitorChore);
+
+        // Do Metrics periodically
+        periodicDoMetricsChore = new PeriodicDoMetrics(msgInterval, this);
+        getChoreService().scheduleChore(periodicDoMetricsChore);
+
+        status.setStatus("Starting namespace manager");
+        initNamespace();
+
+        if (this.cpHost != null) {
+            try {
+                this.cpHost.preMasterInitialization();
+            } catch (IOException e) {
+                LOG.error("Coprocessor preMasterInitialization() hook failed", e);
+            }
+        }
+
+        status.markComplete("Initialization successful");
+        LOG.info(String.format("Master has completed initialization %.3fsec",
+                (System.currentTimeMillis() - masterActiveTime) / 1000.0f));
+        this.masterFinishedInitializationTime = System.currentTimeMillis();
+        configurationManager.registerObserver(this.balancer);
+        configurationManager.registerObserver(this.cleanerPool);
+        configurationManager.registerObserver(this.hfileCleaner);
+        configurationManager.registerObserver(this.logCleaner);
+
+        // Set master as 'initialized'.
+        setInitialized(true);
+
+        assignmentManager.checkIfShouldMoveSystemRegionAsync();
+
+        status.setStatus("Starting quota manager");
+        initQuotaManager();
+
+        // assign the meta replicas
+        Set<ServerName> EMPTY_SET = new HashSet<ServerName>();
+        int numReplicas = conf.getInt(HConstants.META_REPLICAS_NUM,
+                HConstants.DEFAULT_META_REPLICA_NUM);
+        for (int i = 1; i < numReplicas; i++) {
+            assignMeta(status, EMPTY_SET, i);
+        }
+        unassignExcessMetaReplica(zooKeeper, numReplicas);
+
+        // clear the dead servers with same host name and port of online server because we are not
+        // removing dead server with same hostname and port of rs which is trying to check in before
+        // master initialization. See HBASE-5916.
+        this.serverManager.clearDeadServersWithSameHostNameAndPortOfOnlineServer();
+
+        // Check and set the znode ACLs if needed in case we are overtaking a non-secure configuration
+        status.setStatus("Checking ZNode ACLs");
+        zooKeeper.checkAndSetZNodeAcls();
+
+        status.setStatus("Calling postStartMaster coprocessors");
+        if (this.cpHost != null) {
+            // don't let cp initialization errors kill the master
+            try {
+                this.cpHost.postStartMaster();
+            } catch (IOException ioe) {
+                LOG.error("Coprocessor postStartMaster() hook failed", ioe);
+            }
+        }
+
+        zombieDetector.interrupt();
+
+        /*
+         * After master has started up, lets do balancer post startup initialization. Since this runs
+         * in activeMasterManager thread, it should be fine.
+         */
+        long start = System.currentTimeMillis();
+        this.balancer.postMasterStartupInitialize();
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Balancer post startup initialization complete, took " + (
+                    (System.currentTimeMillis() - start) / 1000) + " seconds");
+        }
+    }
+
+
 
   private void initQuotaManager() throws IOException {
     quotaManager = new MasterQuotaManager(this);
@@ -1273,6 +1503,68 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     }
   }
 
+    private void startServiceThreads$instrumentation() throws IOException {
+        // Start the executor service pools
+        this.service.startExecutorService(ExecutorType.MASTER_OPEN_REGION, conf.getInt(
+                HConstants.MASTER_OPEN_REGION_THREADS, HConstants.MASTER_OPEN_REGION_THREADS_DEFAULT));
+        this.service.startExecutorService(ExecutorType.MASTER_CLOSE_REGION, conf.getInt(
+                HConstants.MASTER_CLOSE_REGION_THREADS, HConstants.MASTER_CLOSE_REGION_THREADS_DEFAULT));
+        this.service.startExecutorService(ExecutorType.MASTER_SERVER_OPERATIONS,
+                conf.getInt(HConstants.MASTER_SERVER_OPERATIONS_THREADS,
+                        HConstants.MASTER_SERVER_OPERATIONS_THREADS_DEFAULT));
+        this.service.startExecutorService(ExecutorType.MASTER_META_SERVER_OPERATIONS,
+                conf.getInt(HConstants.MASTER_META_SERVER_OPERATIONS_THREADS,
+                        HConstants.MASTER_META_SERVER_OPERATIONS_THREADS_DEFAULT));
+        this.service.startExecutorService(ExecutorType.M_LOG_REPLAY_OPS, conf.getInt(
+                HConstants.MASTER_LOG_REPLAY_OPS_THREADS, HConstants.MASTER_LOG_REPLAY_OPS_THREADS_DEFAULT));
+        this.service.startExecutorService(ExecutorType.MASTER_SNAPSHOT_OPERATIONS, conf.getInt(
+                SnapshotManager.SNAPSHOT_POOL_THREADS_KEY, SnapshotManager.SNAPSHOT_POOL_THREADS_DEFAULT));
+
+        // We depend on there being only one instance of this executor running
+        // at a time.  To do concurrency, would need fencing of enable/disable of
+        // tables.
+        // Any time changing this maxThreads to > 1, pls see the comment at
+        // AccessController#postCreateTableHandler
+        this.service.startExecutorService(ExecutorType.MASTER_TABLE_OPERATIONS, 1);
+        startProcedureExecutor$instrumentation();
+
+        // Create cleaner thread pool
+        cleanerPool = new DirScanPool(conf);
+        // Start log cleaner thread
+        int cleanerInterval = conf.getInt("hbase.master.cleaner.interval", 600 * 1000);
+        this.logCleaner = new LogCleaner(cleanerInterval, this, conf,
+                getMasterFileSystem().getOldLogDir().getFileSystem(conf),
+                getMasterFileSystem().getOldLogDir(), cleanerPool);
+        getChoreService().scheduleChore(logCleaner);
+        //start the hfile archive cleaner thread
+        Path archiveDir = HFileArchiveUtil.getArchivePath(conf);
+        Map<String, Object> params = new HashMap<String, Object>();
+        params.put(MASTER, this);
+        this.hfileCleaner = new HFileCleaner(cleanerInterval, this, conf,
+                getMasterFileSystem().getFileSystem(), archiveDir, cleanerPool, params);
+        getChoreService().scheduleChore(hfileCleaner);
+        serviceStarted = true;
+        if (LOG.isTraceEnabled()) {
+            LOG.trace("Started service threads");
+        }
+        if (!conf.getBoolean(HConstants.ZOOKEEPER_USEMULTI, true)) {
+            try {
+                replicationZKLockCleanerChore = new ReplicationZKLockCleanerChore(this, this,
+                        cleanerInterval, this.getZooKeeper(), this.conf);
+                getChoreService().scheduleChore(replicationZKLockCleanerChore);
+            } catch (Exception e) {
+                LOG.error("start replicationZKLockCleanerChore failed", e);
+            }
+        }
+        try {
+            replicationZKNodeCleanerChore = new ReplicationZKNodeCleanerChore(this, cleanerInterval,
+                    new ReplicationZKNodeCleaner(this.conf, this.getZooKeeper(), this));
+            getChoreService().scheduleChore(replicationZKNodeCleanerChore);
+        } catch (Exception e) {
+            LOG.error("start replicationZKNodeCleanerChore failed", e);
+        }
+    }
+
   @Override
   protected void sendShutdownInterrupt() {
     super.sendShutdownInterrupt();
@@ -1311,6 +1603,58 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     if (this.assignmentManager != null) this.assignmentManager.stop();
     if (this.fileSystemManager != null) this.fileSystemManager.stop();
     if (this.mpmHost != null) this.mpmHost.stop("server shutting down.");
+  }
+
+  private void prepareWALDirinHDFSForDryRun() {
+        try {
+            final Path walDir = new Path(FSUtils.getWALRootDir(this.conf),
+                    MasterProcedureConstants.MASTER_PROCEDURE_LOGDIR);
+            final Path dryRunWalDir = new Path(FSUtils.getWALRootDir(this.conf),
+                    MasterProcedureConstants.MASTER_PROCEDURE_LOGDIR+"-dryrun");
+            LOG.info("original WAL directory: " + walDir + ", dryrun WAL directory: " + dryRunWalDir);
+            FileSystem fs = null;
+            fs = FSUtils.getWALRootDir(this.conf).getFileSystem(this.conf);
+            LOG.info("fs is: " + fs);
+            if (fs.exists(dryRunWalDir)) {
+                LOG.info("Dryrun WAL directory already exists, deleting it");
+                fs.delete(dryRunWalDir, true);
+            }
+            LOG.info("Creating dryrun WAL directory");
+            fs.mkdirs(dryRunWalDir);
+            LOG.info("Copying WAL directory to dryrun directory for dryrun");
+            if(fs.exists(walDir)){
+                FSUtils.copy(fs, walDir, dryRunWalDir);
+                LOG.info("Successfully copied WAL directory to dryrun directory");
+            }else{
+                LOG.info("WAL directory does not exist, skipping copying");
+            }
+        } catch (IOException e) {
+            LOG.error("Failed to create dryrun WAL directory", e);
+        }
+  }
+
+  private void startProcedureExecutor$instrumentation() throws IOException {
+      final MasterProcedureEnv procEnv = new MasterProcedureEnv(this);
+      final Path walDir = new Path(FSUtils.getWALRootDir(this.conf),
+              MasterProcedureConstants.MASTER_PROCEDURE_LOGDIR);
+      final Path dryRunWalDir = new Path(FSUtils.getWALRootDir(this.conf),
+              MasterProcedureConstants.MASTER_PROCEDURE_LOGDIR+"-dryrun");
+      FileSystem fs = dryRunWalDir.getFileSystem(this.conf);
+      procedureStore = new WALProcedureStore(conf, dryRunWalDir.getFileSystem(conf), dryRunWalDir,
+              new MasterProcedureEnv.WALStoreLeaseRecovery(this));
+      procedureStore.isDryRun = true;
+      procedureStore.registerListener(new MasterProcedureEnv.MasterProcedureStoreListener(this));
+      procedureExecutor = new ProcedureExecutor(conf, procEnv, procedureStore,
+              procEnv.getProcedureQueue());
+
+      final int numThreads = conf.getInt(MasterProcedureConstants.MASTER_PROCEDURE_THREADS,
+              Math.max(Runtime.getRuntime().availableProcessors(),
+                      MasterProcedureConstants.DEFAULT_MIN_MASTER_PROCEDURE_THREADS));
+      final boolean abortOnCorruption = conf.getBoolean(
+              MasterProcedureConstants.EXECUTOR_ABORT_ON_CORRUPTION,
+              MasterProcedureConstants.DEFAULT_EXECUTOR_ABORT_ON_CORRUPTION);
+      procedureStore.start(numThreads);
+      procedureExecutor.start(numThreads, abortOnCorruption);
   }
 
   private void startProcedureExecutor() throws IOException {
@@ -1992,6 +2336,40 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
     }
   }
 
+  public boolean isBackup() {
+        return conf.getBoolean(HConstants.MASTER_TYPE_BACKUP,
+                HConstants.DEFAULT_MASTER_TYPE_BACKUP);
+  }
+
+  private void finishActiveMasterInitialization$Checker(MonitoredTask status) throws CoordinatedStateException, IOException, InterruptedException, KeeperException {
+        if (isBackup()) {
+            LOG.info("Dry run mode, skipping some initialization steps.");
+            //TODO needs support from clone library
+            final HMaster shadowHMaster = this;
+            final MonitoredTask shadowStatus = status;
+            // Prepare znode under /dry-run
+            shadowHMaster.zooKeeper.setDryRunZNode();
+            // Copy /hbase/WALs-MasterProcedure to /hbase/WALs-MasterProcedure-dryrun
+            shadowHMaster.prepareWALDirinHDFSForDryRun();
+            Thread dryRunThread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        shadowHMaster.finishActiveMasterInitialization$instrumentation(shadowStatus);
+                    } catch (Exception e) {
+                        LOG.error("Failed to start dry run", e);
+                    }
+                }
+            });
+            dryRunThread.start();
+            dryRunThread.join();
+            //TODO decide if we need to do anything after dry run
+
+        }else {
+            finishActiveMasterInitialization(status);
+        }
+  }
+
   // HBASE-13350 - Helper method to log warning on sanity check failures if checks disabled.
   private static void warnOrThrowExceptionForFailure(boolean logWarn, String confKey,
       String message, Exception cause) throws IOException {
@@ -2045,7 +2423,8 @@ public class HMaster extends HRegionServer implements MasterServices, Server {
         status.setDescription("Master startup");
         try {
           if (activeMasterManager.blockUntilBecomingActiveMaster(timeout, status)) {
-            finishActiveMasterInitialization(status);
+            //finishActiveMasterInitialization(status);
+            finishActiveMasterInitialization$Checker(status);
           }
         } catch (Throwable t) {
           status.setStatus("Failed to become active: " + t.getMessage());

@@ -70,6 +70,7 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure> {
   private Long parentProcId = null;
   private Long procId = null;
   private long startTime;
+  public boolean isDryRun = false;
 
   // runtime state, updated every operation
   private ProcedureState state = ProcedureState.INITIALIZING;

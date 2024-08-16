@@ -218,6 +218,8 @@ public final class HConstants {
 
   public static final String DEFAULT_ZOOKEEPER_ZNODE_PARENT = "/hbase";
 
+  public static final String DRY_RUN_DIR = "/dry-run";
+
   /**
    * Parameter name for the limit on concurrent client-side zookeeper
    * connections

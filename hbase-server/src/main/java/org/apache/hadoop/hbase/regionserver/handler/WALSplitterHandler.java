@@ -70,6 +70,7 @@ public class WALSplitterHandler extends EventHandler {
     long startTime = System.currentTimeMillis();
     try {
       Status status = this.splitTaskExecutor.exec(splitTaskDetails.getWALFile(), mode, reporter);
+      LOG.info("Failure Recovery, status is " + status + " for task " + splitTaskDetails.toString());
       switch (status) {
       case DONE:
         coordination.endTask(new SplitLogTask.Done(this.serverName,this.mode),

@@ -71,6 +71,8 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
   private String prefix;
   private String identifier;
 
+  public boolean isDryRun = false;
+
   // zookeeper quorum
   private String quorum;
 
@@ -114,6 +116,7 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
   public String clusterIdZNode;
   // znode used for log splitting work assignment
   public String splitLogZNode;
+  public String dryRunSplitLogZNode;
   // znode containing the state of the load balancer
   public String balancerZNode;
   // znode containing the state of region normalizer
@@ -153,6 +156,25 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
   public ZooKeeperWatcher(Configuration conf, String identifier,
       Abortable abortable) throws ZooKeeperConnectionException, IOException {
     this(conf, identifier, abortable, false);
+  }
+
+  public void setDryRunZNode() throws KeeperException {
+      isDryRun = true;
+      splitLogZNode = HConstants.DRY_RUN_DIR + splitLogZNode;
+      ZKUtil.createWithParents(this, splitLogZNode);
+      LOG.info("Failure Recovery, splitLogZNode is "+splitLogZNode + "checkSplitZNode is "+checkSplitZNode());
+  }
+
+  public boolean checkSplitZNode(){
+        int res=-1;
+        String splitLog= "/hbase/splitWAL";
+        try{
+            res = ZKUtil.checkExists(this, splitLog);
+        } catch (KeeperException e) {
+            LOG.error("Failed to check znode " + splitLog, e);
+            return false;
+        }
+        return res!=-1;
   }
 
   /**
@@ -449,6 +471,8 @@ public class ZooKeeperWatcher implements Watcher, Abortable, Closeable {
         conf.get("zookeeper.znode.clusterId", "hbaseid"));
     splitLogZNode = ZKUtil.joinZNode(baseZNode,
         conf.get("zookeeper.znode.splitlog", HConstants.SPLIT_LOGDIR_NAME));
+    dryRunSplitLogZNode = HConstants.DRY_RUN_DIR + splitLogZNode;
+
     balancerZNode = ZKUtil.joinZNode(baseZNode,
         conf.get("zookeeper.znode.balancer", "balancer"));
     regionNormalizerZNode = ZKUtil.joinZNode(baseZNode,

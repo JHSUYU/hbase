@@ -323,6 +323,12 @@ public class MasterFileSystem {
     splitLog(serverNames);
   }
 
+  public void splitLog$instrumentation(final ServerName serverName) throws IOException {
+        Set<ServerName> serverNames = new HashSet<ServerName>();
+        serverNames.add(serverName);
+        splitLog(serverNames);
+  }
+
   /**
    * Specialized method to handle the splitting for meta WAL
    * @param serverName
@@ -406,6 +412,10 @@ public class MasterFileSystem {
     splitLog(serverNames, NON_META_FILTER);
   }
 
+  public void splitLog$instrumentation(final Set<ServerName> serverNames) throws IOException {
+        splitLog$instrumentation(serverNames, NON_META_FILTER);
+  }
+
   /**
    * Wrapper function on {@link SplitLogManager#removeStaleRecoveringRegions(Set)}
    * @param failedServers
@@ -440,6 +450,24 @@ public class MasterFileSystem {
         this.metricsMasterFilesystem.addSplit(splitTime, splitLogSize);
       }
     }
+  }
+
+  public void splitLog$instrumentation(final Set<ServerName> serverNames, PathFilter filter) throws IOException {
+        long splitTime = 0, splitLogSize = 0;
+        List<Path> logDirs = getLogDirs(serverNames);
+
+        splitLogManager.handleDeadWorkers(serverNames);
+        splitTime = EnvironmentEdgeManager.currentTime();
+        splitLogSize = splitLogManager.splitLogDistributed(serverNames, logDirs, filter);
+        splitTime = EnvironmentEdgeManager.currentTime() - splitTime;
+
+        if (this.metricsMasterFilesystem != null) {
+            if (filter == META_FILTER) {
+                this.metricsMasterFilesystem.addMetaWALSplit(splitTime, splitLogSize);
+            } else {
+                this.metricsMasterFilesystem.addSplit(splitTime, splitLogSize);
+            }
+        }
   }
 
   /**
@@ -643,6 +671,10 @@ public class MasterFileSystem {
    */
   public void setLogRecoveryMode() throws IOException {
       this.splitLogManager.setRecoveryMode(false);
+  }
+
+  public void setLogRecoveryMode$instrumentation() throws IOException {
+      this.splitLogManager.setRecoveryMode$instrumentation(false);
   }
 
   public RecoveryMode getLogRecoveryMode() {

@@ -744,8 +744,10 @@ public class RegionStates {
       for (HRegionInfo region : assignedRegions) {
         // Offline open regions, no need to offline if SPLIT/MERGED/OFFLINE
         if (isRegionOnline(region)) {
+          LOG.info("Offlining region " + region.getRegionNameAsString() + " on " + sn);
           regionsToOffline.add(region);
         } else if (isRegionInState(region, State.SPLITTING, State.MERGING)) {
+          LOG.info("Offline splitting/merging region " + getRegionState(region));
           LOG.debug("Offline splitting/merging region " + getRegionState(region));
           try {
             // Delete the ZNode if exists

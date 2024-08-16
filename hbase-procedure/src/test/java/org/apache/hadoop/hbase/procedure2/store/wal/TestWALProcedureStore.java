@@ -96,10 +96,15 @@ public class TestWALProcedureStore {
 
   @Test
   public void testEmptyRoll() throws Exception {
+    FileStatus[] status = fs.listStatus(logDir);
+    //print the log files information in status
+    for (FileStatus fileStatus : status) {
+      System.out.println("Failure Recovery " + fileStatus.getPath().getName());
+    }
     for (int i = 0; i < 10; ++i) {
       procStore.periodicRollForTesting();
     }
-    FileStatus[] status = fs.listStatus(logDir);
+    status = fs.listStatus(logDir);
     assertEquals(1, status.length);
   }
 

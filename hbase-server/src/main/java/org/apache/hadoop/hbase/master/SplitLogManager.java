@@ -56,6 +56,7 @@ import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.hbase.coordination.BaseCoordinatedStateManager;
 import org.apache.hadoop.hbase.coordination.SplitLogManagerCoordination;
 import org.apache.hadoop.hbase.coordination.SplitLogManagerCoordination.SplitLogManagerDetails;
+import org.apache.hadoop.hbase.coordination.ZKSplitLogManagerCoordination;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.monitoring.TaskMonitor;
 import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.SplitLogTask.RecoveryMode;
@@ -66,6 +67,7 @@ import org.apache.hadoop.hbase.wal.DefaultWALProvider;
 import org.apache.hadoop.hbase.wal.WALFactory;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 
 /**
  * Distributes the task of log splitting to the available region servers.
@@ -260,6 +262,7 @@ public class SplitLogManager {
     TaskBatch batch = new TaskBatch();
     Boolean isMetaRecovery = (filter == null) ? null : false;
     for (FileStatus lf : logfiles) {
+      LOG.info("Failure Recovery Splitting WAL=" + lf.getPath() + " for serverName=" + serverNames);
       // TODO If the log file is still being written to - which is most likely
       // the case for the last log file - then its length will show up here
       // as zero. The size of such a file can only be retrieved after
@@ -267,11 +270,14 @@ public class SplitLogManager {
       // metrics that it drives will also be under-reported.
       totalSize += lf.getLen();
       String pathToLog = FSUtils.removeWALRootPath(lf.getPath(), conf);
+      LOG.info("Failure Recovery, pathToLog=" + pathToLog);
       if (!enqueueSplitTask(pathToLog, batch)) {
         throw new IOException("duplicate log split scheduled for " + lf.getPath());
       }
     }
+    LOG.info("Failure Recovery, waitForSplittingCompletion");
     waitForSplittingCompletion(batch, status);
+    LOG.info("Failure Recovery, finish waitForSplittingCompletion");
     // remove recovering regions
     if (filter == MasterFileSystem.META_FILTER /* reference comparison */) {
       // we split meta regions and user regions separately therefore logfiles are either all for
@@ -324,15 +330,24 @@ public class SplitLogManager {
    * @return true if a new entry is created, false if it is already there.
    */
   boolean enqueueSplitTask(String taskname, TaskBatch batch) {
+    LOG.info("Failure Recovery, enqueueSplitTask");
     lastTaskCreateTime = EnvironmentEdgeManager.currentTime();
     String task =
         ((BaseCoordinatedStateManager) server.getCoordinatedStateManager())
             .getSplitLogManagerCoordination().prepareTask(taskname);
+    LOG.info("Failure Recovery Task is " + task);
     Task oldtask = createTaskIfAbsent(task, batch);
     if (oldtask == null) {
       // publish the task in the coordination engine
       ((BaseCoordinatedStateManager) server.getCoordinatedStateManager())
           .getSplitLogManagerCoordination().submitTask(task);
+      try{
+          int res = ZKUtil.checkExists(server.getZooKeeper(), server.getZooKeeper().splitLogZNode);
+          LOG.info("Failure Recovery ZKUtil.checkExists returned " + res);
+      } catch (Exception e){
+          LOG.error("Error while creating znode", e);
+      }
+
       return true;
     }
     return false;
@@ -569,6 +584,12 @@ public class SplitLogManager {
   public void setRecoveryMode(boolean isForInitialization) throws IOException {
     ((BaseCoordinatedStateManager) server.getCoordinatedStateManager())
         .getSplitLogManagerCoordination().setRecoveryMode(isForInitialization);
+
+  }
+
+  public void setRecoveryMode$instrumentation(boolean isForInitialization) throws IOException {
+      ((ZKSplitLogManagerCoordination)((BaseCoordinatedStateManager) server.getCoordinatedStateManager())
+                .getSplitLogManagerCoordination()).setRecoveryMode$instrumentation(isForInitialization);
 
   }
 

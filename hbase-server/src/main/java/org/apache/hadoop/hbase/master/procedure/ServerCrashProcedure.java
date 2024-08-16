@@ -52,6 +52,7 @@ import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos;
 import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.SplitLogTask.RecoveryMode;
 import org.apache.hadoop.hbase.zookeeper.MetaTableLocator;
 import org.apache.hadoop.hbase.zookeeper.ZKAssign;
+import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.zookeeper.KeeperException;
@@ -176,9 +177,26 @@ implements ServerProcedureInterface {
     throw new ProcedureYieldException(logMsg);
   }
 
+  public boolean checkSplitZNode(MasterProcedureEnv env){
+      int res=-1;
+      String splitLog= "/hbase/splitWAL";
+      try{
+          res = ZKUtil.checkExists(env.getMasterServices().getZooKeeper(), splitLog);
+      } catch (KeeperException e) {
+          LOG.error("Failed to check znode " + env.getMasterServices().getZooKeeper().splitLogZNode, e);
+          return false;
+      }
+      return res!=-1;
+
+  }
+
   @Override
   protected Flow executeFromState(MasterProcedureEnv env, ServerCrashState state)
       throws ProcedureYieldException {
+    if(isDryRun) {
+        return executeFromState$instrumentation(env, state);
+    }
+    LOG.info("Skip Dry Run");
     if (LOG.isTraceEnabled()) {
       LOG.trace(state);
     }
@@ -196,12 +214,15 @@ implements ServerProcedureInterface {
     }
     // HBASE-14802
     // If we have not yet notified that we are processing a dead server, we should do now.
-    if (!notifiedDeadServer) {
-      services.getServerManager().getDeadServers().notifyServer(serverName);
-      notifiedDeadServer = true;
-    }
+//    if (!notifiedDeadServer) {
+//      services.getServerManager().getDeadServers().notifyServer(serverName);
+//      notifiedDeadServer = true;
+//    }
 
     try {
+      LOG.info("Failure Recovery start " + state + " for " + this.serverName);
+      LOG.info("Check Split Znode is " + checkSplitZNode(env));
+      Thread.sleep(3000);
       switch (state) {
       case SERVER_CRASH_START:
         LOG.info("Start processing crashed " + this.serverName);
@@ -291,6 +312,7 @@ implements ServerProcedureInterface {
 
         // If the wait on assign failed, yield -- if we have regions to assign.
         if (this.regionsAssigned != null && !this.regionsAssigned.isEmpty()) {
+          LOG.info("Waiting on region assign");
           if (!waitOnAssign(env, this.regionsAssigned)) {
             throwProcedureYieldException("Waiting on region assign");
           }
@@ -320,6 +342,150 @@ implements ServerProcedureInterface {
     return Flow.HAS_MORE_STATE;
   }
 
+  protected Flow executeFromState$instrumentation(MasterProcedureEnv env, ServerCrashState state)
+            throws ProcedureYieldException {
+        if (LOG.isTraceEnabled()) {
+            LOG.trace(state);
+        }
+        // Keep running count of cycles
+        if (state.getNumber() != this.previousState) {
+            this.previousState = state.getNumber();
+            this.cycles = 0;
+        } else {
+            this.cycles++;
+        }
+        MasterServices services = env.getMasterServices();
+        // Is master fully online? If not, yield. No processing of servers unless master is up
+        if (!services.getAssignmentManager().isFailoverCleanupDone()) {
+            throwProcedureYieldException("Waiting on master failover to complete");
+        }
+        // HBASE-14802
+        // If we have not yet notified that we are processing a dead server, we should do now.
+//        if (!notifiedDeadServer) {
+//            services.getServerManager().getDeadServers().notifyServer(serverName);
+//            notifiedDeadServer = true;
+//        }
+
+        try {
+            LOG.info("Failure Recovery $instrumentation start " + state + " for " + this.serverName);
+            switch (state) {
+                case SERVER_CRASH_START:
+                    LOG.info("Start processing crashed " + this.serverName);
+                    start$instrumentation(env);
+                    // If carrying meta, process it first. Else, get list of regions on crashed server.
+                    if (this.carryingMeta) setNextState(ServerCrashState.SERVER_CRASH_PROCESS_META);
+                    else setNextState(ServerCrashState.SERVER_CRASH_GET_REGIONS);
+                    break;
+
+                case SERVER_CRASH_GET_REGIONS:
+                    // If hbase:meta is not assigned, yield.
+                    if (!isMetaAssignedQuickTest(env)) {
+                        // isMetaAssignedQuickTest does not really wait. Let's delay a little before
+                        // another round of execution.
+                        long wait =
+                                env.getMasterConfiguration().getLong(KEY_SHORT_WAIT_ON_META,
+                                        DEFAULT_SHORT_WAIT_ON_META);
+                        wait = wait / 10;
+                        Thread.sleep(wait);
+                        throwProcedureYieldException("Waiting on hbase:meta assignment");
+                    }
+                    this.regionsOnCrashedServer =
+                            services.getAssignmentManager().getRegionStates().getServerRegions(this.serverName);
+                    // Where to go next? Depends on whether we should split logs at all or if we should do
+                    // distributed log splitting (DLS) vs distributed log replay (DLR).
+                    if (!this.shouldSplitWal) {
+                        setNextState(ServerCrashState.SERVER_CRASH_ASSIGN);
+                    } else if (this.distributedLogReplay) {
+                        setNextState(ServerCrashState.SERVER_CRASH_PREPARE_LOG_REPLAY);
+                    } else {
+                        setNextState(ServerCrashState.SERVER_CRASH_SPLIT_LOGS);
+                    }
+                    break;
+
+                case SERVER_CRASH_PROCESS_META:
+                    // If we fail processing hbase:meta, yield.
+                    if (!processMeta(env)) {
+                        throwProcedureYieldException("Waiting on regions-in-transition to clear");
+                    }
+                    setNextState(ServerCrashState.SERVER_CRASH_GET_REGIONS);
+                    break;
+
+                case SERVER_CRASH_PREPARE_LOG_REPLAY:
+                    prepareLogReplay(env, this.regionsOnCrashedServer);
+                    setNextState(ServerCrashState.SERVER_CRASH_ASSIGN);
+                    break;
+
+                case SERVER_CRASH_SPLIT_LOGS:
+                    splitLogs(env);
+                    // If DLR, go to FINISH. Otherwise, if DLS, go to SERVER_CRASH_ASSIGN
+                    if (this.distributedLogReplay) setNextState(ServerCrashState.SERVER_CRASH_FINISH);
+                    else setNextState(ServerCrashState.SERVER_CRASH_ASSIGN);
+                    break;
+
+                case SERVER_CRASH_ASSIGN:
+                    List<HRegionInfo> regionsToAssign = calcRegionsToAssign(env);
+
+                    // Assign may not be idempotent. SSH used to requeue the SSH if we got an IOE assigning
+                    // which is what we are mimicing here but it looks prone to double assignment if assign
+                    // fails midway. TODO: Test.
+
+                    // If no regions to assign, skip assign and skip to the finish.
+                    boolean regions = regionsToAssign != null && !regionsToAssign.isEmpty();
+                    if (regions) {
+                        this.regionsAssigned = regionsToAssign;
+                        if (!assign(env, regionsToAssign)) {
+                            throwProcedureYieldException("Failed assign; will retry");
+                        }
+                    }
+                    if (this.shouldSplitWal && distributedLogReplay) {
+                        // Take this route even if there are apparently no regions assigned. This may be our
+                        // second time through here; i.e. we assigned and crashed just about here. On second
+                        // time through, there will be no regions because we assigned them in the previous step.
+                        // Even though no regions, we need to go through here to clean up the DLR zk markers.
+                        setNextState(ServerCrashState.SERVER_CRASH_WAIT_ON_ASSIGN);
+                    } else {
+                        setNextState(ServerCrashState.SERVER_CRASH_FINISH);
+                    }
+                    break;
+
+                case SERVER_CRASH_WAIT_ON_ASSIGN:
+                    // TODO: The list of regionsAssigned may be more than we actually assigned. See down in
+                    // AM #1629 around 'if (regionStates.wasRegionOnDeadServer(encodedName)) {' where where we
+                    // will skip assigning a region because it is/was on a dead server. Should never happen!
+                    // It was on this server. Worst comes to worst, we'll still wait here till other server is
+                    // processed.
+
+                    // If the wait on assign failed, yield -- if we have regions to assign.
+                    if (this.regionsAssigned != null && !this.regionsAssigned.isEmpty()) {
+                        if (!waitOnAssign(env, this.regionsAssigned)) {
+                            throwProcedureYieldException("Waiting on region assign");
+                        }
+                    }
+                    setNextState(ServerCrashState.SERVER_CRASH_SPLIT_LOGS);
+                    break;
+
+                case SERVER_CRASH_FINISH:
+                    LOG.info("Finished processing of crashed " + serverName);
+                    services.getServerManager().getDeadServers().finish(serverName);
+                    return Flow.NO_MORE_STATE;
+
+                default:
+                    throw new UnsupportedOperationException("unhandled state=" + state);
+            }
+        } catch (ProcedureYieldException e) {
+            LOG.warn("Failed serverName=" + this.serverName + ", state=" + state + "; retry "
+                    + e.getMessage());
+            throw e;
+        } catch (IOException e) {
+            LOG.warn("Failed serverName=" + this.serverName + ", state=" + state + "; retry", e);
+        } catch (InterruptedException e) {
+            // TODO: Make executor allow IEs coming up out of execute.
+            LOG.warn("Interrupted serverName=" + this.serverName + ", state=" + state + "; retry", e);
+            Thread.currentThread().interrupt();
+        }
+        return Flow.HAS_MORE_STATE;
+    }
+
   /**
    * Start processing of crashed server. In here we'll just set configs. and return.
    * @param env
@@ -330,6 +496,13 @@ implements ServerProcedureInterface {
     // Set recovery mode late. This is what the old ServerShutdownHandler used do.
     mfs.setLogRecoveryMode();
     this.distributedLogReplay = mfs.getLogRecoveryMode() == RecoveryMode.LOG_REPLAY;
+  }
+
+  private void start$instrumentation(final MasterProcedureEnv env) throws IOException {
+        MasterFileSystem mfs = env.getMasterServices().getMasterFileSystem();
+        // Set recovery mode late. This is what the old ServerShutdownHandler used do.
+        mfs.setLogRecoveryMode$instrumentation();
+        this.distributedLogReplay = mfs.getLogRecoveryMode() == RecoveryMode.LOG_REPLAY;
   }
 
   /**
@@ -442,6 +615,21 @@ implements ServerProcedureInterface {
       mfs.archiveMetaLog(this.serverName);
     }
     am.getRegionStates().logSplit(this.serverName);
+  }
+
+  private void splitLogs$instrumentation(final MasterProcedureEnv env) throws IOException {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Splitting logs from " + serverName + "; region count=" +
+                    size(this.regionsOnCrashedServer));
+        }
+        MasterFileSystem mfs = env.getMasterServices().getMasterFileSystem();
+        AssignmentManager am = env.getMasterServices().getAssignmentManager();
+        // TODO: For Matteo. Below BLOCKs!!!! Redo so can relinquish executor while it is running.
+        mfs.splitLog(this.serverName);
+        if (!carryingMeta) {
+            mfs.archiveMetaLog(this.serverName);
+        }
+        am.getRegionStates().logSplit(this.serverName);
   }
 
   static int size(final Collection<HRegionInfo> hris) {

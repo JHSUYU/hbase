@@ -62,15 +62,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.HadoopIllegalArgumentException;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.BlockLocation;
-import org.apache.hadoop.fs.FSDataInputStream;
-import org.apache.hadoop.fs.FSDataOutputStream;
-import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.LocatedFileStatus;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.PathFilter;
-import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.fs.*;
 import org.apache.hadoop.fs.permission.FsAction;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.hbase.ClusterId;
@@ -225,7 +217,7 @@ public abstract class FSUtils {
   }
 
   /**
-   * Compare path component of the Path URI; e.g. if hdfs://a/b/c and /a/b/c, it will compare the
+   * Compare path component of the Påath URI; e.g. if hdfs://a/b/c and /a/b/c, it will compare the
    * '/a/b/c' part. Does not consider schema; i.e. if schemas different but path or subpath matches,
    * the two will equate.
    * @param pathToSearch Path we will be trying to match.
@@ -2373,4 +2365,44 @@ public abstract class FSUtils {
     int hbaseSize = conf.getInt("hbase." + dfsKey, defaultSize);
     conf.setIfUnset(dfsKey, Integer.toString(hbaseSize));
   }
+
+    public static void copy(FileSystem fs, Path src, Path dst) throws IOException {
+        LOG.info("enter copy: " + src + " to " + dst);
+        FileStatus[] files = fs.listStatus(src);
+        LOG.info("list files: " + files.length);
+        for (FileStatus file : files) {
+            LOG.info("file: " + file.getPath() + " isDir: " + file.isDirectory());
+            Path srcPath = file.getPath();
+            LOG.info("srcPath: " + srcPath);
+            Path dstPath = new Path(dst, srcPath.getName());
+            LOG.info("dstPath: " + dstPath);
+
+            if (file.isDirectory()) {
+                // 如果是目录,递归复制
+                LOG.info("recursive copy: " + srcPath + " to " + dstPath);
+                fs.mkdirs(dstPath);
+                copy(fs, srcPath, dstPath);
+            } else {
+                // 如果是文件,执行复制
+                if (!fs.exists(dstPath) || fs.getFileStatus(dstPath).getLen() != file.getLen()) {
+                    FSDataInputStream in = null;
+                    FSDataOutputStream out = null;
+                    try {
+                        in = fs.open(srcPath);
+                        out = fs.create(dstPath, true);
+                        LOG.info("copy file: " + srcPath + " to " + dstPath);
+                        IOUtils.copyBytes(in, out, fs.getConf(), false);
+                        LOG.info("copy file: " + srcPath + " to " + dstPath + " success");
+                    } finally {
+                        IOUtils.closeStream(in);
+                        IOUtils.closeStream(out);
+                    }
+                }
+            }
+        }
+    }
+
+
+
+
 }

@@ -35,6 +35,7 @@ import org.apache.hadoop.hbase.Server;
 import org.apache.hadoop.hbase.client.RetriesExhaustedException;
 import org.apache.hadoop.hbase.coordination.BaseCoordinatedStateManager;
 import org.apache.hadoop.hbase.coordination.SplitLogWorkerCoordination;
+import org.apache.hadoop.hbase.coordination.ZkSplitLogWorkerCoordination;
 import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos.SplitLogTask.RecoveryMode;
 import org.apache.hadoop.hbase.wal.WALFactory;
 import org.apache.hadoop.hbase.wal.WALSplitter;
@@ -71,6 +72,7 @@ public class SplitLogWorker implements Runnable {
   private SplitLogWorkerCoordination coordination;
   private Configuration conf;
   private RegionServerServices server;
+  public boolean isDryRun = false;
 
   public SplitLogWorker(Server hserver, Configuration conf, RegionServerServices server,
       TaskExecutor splitTaskExecutor) {
@@ -134,18 +136,54 @@ public class SplitLogWorker implements Runnable {
     });
   }
 
+  public void run$instrumentation() {
+      try {
+          LOG.info("SplitLogWorker " + server.getServerName() + " starting");
+          coordination.registerListener();
+          // wait for Coordination Engine is ready
+          boolean res = false;
+          while (!res && !coordination.isStop()) {
+              LOG.info("SplitLogWorker " + server.getServerName() + " waiting for coordination to be ready");
+              res = ((ZkSplitLogWorkerCoordination)coordination).isDryRunReady();
+          }
+          LOG.info("Failure Recovery, exiting SplitLogWorker, line 174 serverName=" + server.getServerName() + "coordination.isStop()=" + coordination.isStop());
+          if (!coordination.isStop()) {
+              LOG.info("entering taskLoop$instrumentation");
+              ((ZkSplitLogWorkerCoordination)coordination).taskLoop$instrumentation();
+          }
+      } catch (Throwable t) {
+          if (ExceptionUtil.isInterrupt(t)) {
+              LOG.info("SplitLogWorker interrupted. Exiting. " + (coordination.isStop() ? "" :
+                      " (ERROR: exitWorker is not set, exiting anyway)"));
+          } else {
+              // only a logical error can cause here. Printing it out
+              // to make debugging easier
+              LOG.error("unexpected error ", t);
+          }
+      } finally {
+          coordination.removeListener();
+          LOG.info("SplitLogWorker " + server.getServerName() + " exiting");
+      }
+  }
+
   @Override
   public void run() {
+    if(isDryRun){
+        run$instrumentation();
+        return;
+    }
     try {
       LOG.info("SplitLogWorker " + server.getServerName() + " starting");
       coordination.registerListener();
       // wait for Coordination Engine is ready
       boolean res = false;
       while (!res && !coordination.isStop()) {
-        res = coordination.isReady();
+         LOG.info("SplitLogWorker " + server.getServerName() + " waiting for coordination to be ready");
+        res = ((ZkSplitLogWorkerCoordination)coordination).isReady();
       }
+      LOG.info("Failure Recovery, exiting SplitLogWorker, line 174 serverName=" + server.getServerName());
       if (!coordination.isStop()) {
-        coordination.taskLoop();
+          ((ZkSplitLogWorkerCoordination)coordination).taskLoop();
       }
     } catch (Throwable t) {
       if (ExceptionUtil.isInterrupt(t)) {

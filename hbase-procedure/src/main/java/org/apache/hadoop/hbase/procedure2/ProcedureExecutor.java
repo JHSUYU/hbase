@@ -251,6 +251,7 @@ public class ProcedureExecutor<TEnvironment> {
   private final TEnvironment environment;
   private final ProcedureStore store;
   private final Configuration conf;
+  public boolean isDryRun = false;
 
   private Thread[] threads;
 
@@ -898,11 +899,11 @@ public class ProcedureExecutor<TEnvironment> {
    * while the executor is in a running state,
    * fetch a procedure from the runnables queue and start the execution.
    */
-  private void execLoop() {
+  private void execLoop$instrumentation() {
     while (isRunning()) {
       Procedure proc = runnables.poll();
+      proc.isDryRun = true;
       if (proc == null) continue;
-
       try {
         activeExecutorCount.incrementAndGet();
         execLoop(proc);
@@ -910,6 +911,20 @@ public class ProcedureExecutor<TEnvironment> {
         activeExecutorCount.decrementAndGet();
       }
     }
+  }
+
+  private void execLoop() {
+        while (isRunning()) {
+            Procedure proc = runnables.poll();
+            if (proc == null) continue;
+
+            try {
+                activeExecutorCount.incrementAndGet();
+                execLoop(proc);
+            } finally {
+                activeExecutorCount.decrementAndGet();
+            }
+        }
   }
 
   private void execLoop(Procedure proc) {
@@ -978,6 +993,73 @@ public class ProcedureExecutor<TEnvironment> {
       }
     } while (procStack.isFailed());
   }
+
+    private void execLoop$instrumentation(Procedure proc) {
+        if (LOG.isTraceEnabled()) {
+            LOG.trace("Trying to start the execution of " + proc);
+        }
+
+        Long rootProcId = getRootProcedureId(proc);
+        if (rootProcId == null) {
+            // The 'proc' was ready to run but the root procedure was rolledback
+            executeRollback(proc);
+            return;
+        }
+
+        RootProcedureState procStack = rollbackStack.get(rootProcId);
+        if (procStack == null) return;
+
+        do {
+            // Try to acquire the execution
+            if (!procStack.acquire(proc)) {
+                if (procStack.setRollback()) {
+                    // we have the 'rollback-lock' we can start rollingback
+                    if (!executeRollback(rootProcId, procStack)) {
+                        procStack.unsetRollback();
+                        runnables.yield(proc);
+                    }
+                } else {
+                    // if we can't rollback means that some child is still running.
+                    // the rollback will be executed after all the children are done.
+                    // If the procedure was never executed, remove and mark it as rolledback.
+                    if (!proc.wasExecuted()) {
+                        if (!executeRollback(proc)) {
+                            runnables.yield(proc);
+                        }
+                    }
+                }
+                break;
+            }
+
+            // Execute the procedure
+            assert proc.getState() == ProcedureState.RUNNABLE;
+            if (proc.acquireLock(getEnvironment())) {
+                execProcedure(procStack, proc);
+                proc.releaseLock(getEnvironment());
+            } else {
+                runnables.yield(proc);
+            }
+            procStack.release(proc);
+
+            // allows to kill the executor before something is stored to the wal.
+            // useful to test the procedure recovery.
+            if (testing != null && !isRunning()) {
+                break;
+            }
+
+            if (proc.isSuccess()) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Procedure completed in " +
+                            StringUtils.humanTimeDiff(proc.elapsedTime()) + ": " + proc);
+                }
+                // Finalize the procedure state
+                if (proc.getProcId() == rootProcId) {
+                    procedureFinished(proc);
+                }
+                break;
+            }
+        } while (procStack.isFailed());
+    }
 
   private void timeoutLoop() {
     while (isRunning()) {
