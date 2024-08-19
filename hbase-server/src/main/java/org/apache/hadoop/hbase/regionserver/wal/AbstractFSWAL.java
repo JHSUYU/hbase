@@ -654,6 +654,7 @@ public abstract class AbstractFSWAL<W extends WriterBase> implements WAL {
 
     if (!this.listeners.isEmpty()) {
       for (WALActionsListener i : this.listeners) {
+        LOG.info("telling listener " + i + " about pre log roll");
         i.preLogRoll(oldPath, newPath);
       }
     }
@@ -911,7 +912,9 @@ public abstract class AbstractFSWAL<W extends WriterBase> implements WAL {
       }
       try {
         Path oldPath = getOldPath();
+        LOG.info("Failure Recovery, old path is " + oldPath);
         Path newPath = getNewPath();
+        LOG.info("Failure Recovery, new path is " + newPath);
         // Any exception from here on is catastrophic, non-recoverable, so we currently abort.
         W nextWriter = this.createWriterInstance(newPath);
         tellListenersAboutPreLogRoll(oldPath, newPath);

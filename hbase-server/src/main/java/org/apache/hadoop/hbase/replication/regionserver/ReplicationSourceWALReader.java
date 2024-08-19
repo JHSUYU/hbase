@@ -130,9 +130,11 @@ class ReplicationSourceWALReader extends Thread {
 
   @Override
   public void run() {
+    LOG.info("Failure Recovery Start: ReplicationSourceWALReaderThread run");
     int sleepMultiplier = 1;
     while (isReaderRunning()) { // we only loop back here if something fatal happened to our stream
       WALEntryBatch batch = null;
+      LOG.info("Failure Recovery, retry here");
       try (WALEntryStream entryStream =
         new WALEntryStream(logQueue, conf, currentPosition, source.getWALFileLengthProvider(),
           source.getServerWALsBelongTo(), source.getSourceMetrics(), walGroupId)) {
@@ -148,7 +150,10 @@ class ReplicationSourceWALReader extends Thread {
           if (!checkQuota()) {
             continue;
           }
+          LOG.info("before tryAdvanceStreamAndCreateWALBatch");
           batch = tryAdvanceStreamAndCreateWALBatch(entryStream);
+          LOG.info("after tryAdvanceStreamAndCreateWALBatch");
+          LOG.info("batch is "+batch);
           if (batch == null) {
             // got no entries and didn't advance position in WAL
             handleEmptyWALEntryBatch();
@@ -160,12 +165,15 @@ class ReplicationSourceWALReader extends Thread {
             // if we have already switched a file, skip reading and put it directly to the ship
             // queue
             if (!batch.isEndOfFile()) {
+              LOG.info("Before readWALEntries");
               readWALEntries(entryStream, batch);
               currentPosition = entryStream.getPosition();
+              LOG.info("After readWALEntries");
             }
             // need to propagate the batch even it has no entries since it may carry the last
             // sequence id information for serial replication.
             LOG.debug("Read {} WAL entries eligible for replication", batch.getNbEntries());
+            LOG.info("Read {} WAL entries eligible for replication", batch.getNbEntries());
             entryBatchQueue.put(batch);
             successAddToQueue = true;
             sleepMultiplier = 1;
@@ -176,17 +184,18 @@ class ReplicationSourceWALReader extends Thread {
               // acquired in ReplicationSourceWALReader.acquireBufferQuota.
               this.releaseBufferQuota(batch);
             }
-            LOG.info("Failure Recovery, inject NullPointerException to trigger retry");
-            lock.lock();
-            if(NULL_POINTER_COUNT == 1) {
-              NULL_POINTER_COUNT--;
-              lock.unlock();
-              throw new NullPointerException();
-            }
-            lock.unlock();
+//            LOG.info("Failure Recovery, inject NullPointerException to trigger retry");
+//            lock.lock();
+//            if(NULL_POINTER_COUNT == 1) {
+//              NULL_POINTER_COUNT--;
+//              lock.unlock();
+//              throw new NullPointerException();
+//            }
+//            lock.unlock();
           }
         }
-      } catch (WALEntryFilterRetryableException | IOException e) { // stream related
+      } catch (WALEntryFilterRetryableException | IOException e) {// stream related
+        System.out.println("Encountered stream related exception while reading WAL, retrying the e is " + e);
         if (!handleEofException(e, batch)) {
           LOG.warn("Failed to read stream of replication entries", e);
           if (sleepMultiplier < maxRetriesMultiplier) {
@@ -234,6 +243,7 @@ class ReplicationSourceWALReader extends Thread {
     Path currentPath = entryStream.getCurrentPath();
     for (;;) {
       Entry entry = entryStream.next();
+      LOG.info("entry: " + entry);
       batch.setLastWalPosition(entryStream.getPosition());
       entry = filterEntry(entry);
       if (entry != null) {
@@ -269,6 +279,7 @@ class ReplicationSourceWALReader extends Thread {
   private WALEntryBatch tryAdvanceStreamAndCreateWALBatch(WALEntryStream entryStream)
     throws IOException {
     Path currentPath = entryStream.getCurrentPath();
+    LOG.info("Current path: " + currentPath);
     if (!entryStream.hasNext()) {
       // check whether we have switched a file
       if (currentPath != null && switched(entryStream, currentPath)) {
@@ -298,16 +309,18 @@ class ReplicationSourceWALReader extends Thread {
    * @return true only the IOE can be handled
    */
   private boolean handleEofException(Exception e, WALEntryBatch batch) {
+    LOG.debug("Enter handleEofException", e);
     PriorityBlockingQueue<Path> queue = logQueue.getQueue(walGroupId);
     // Dump the log even if logQueue size is 1 if the source is from recovered Source
     // since we don't add current log to recovered source queue so it is safe to remove.
     if (
       (e instanceof EOFException || e.getCause() instanceof EOFException)
-        && (source.isRecovered() || queue.size() > 1) && this.eofAutoRecovery
+        && (source.isRecovered() || queue.size() > 1) && false
     ) {
       Path path = queue.peek();
       try {
         if (!fs.exists(path)) {
+          LOG.info("WAL file {} doesn't exist. Skip it", path);
           // There is a chance that wal has moved to oldWALs directory, so look there also.
           path = AbstractFSWALProvider.findArchivedLog(path, conf);
           // path can be null if unable to locate in archiveDir.

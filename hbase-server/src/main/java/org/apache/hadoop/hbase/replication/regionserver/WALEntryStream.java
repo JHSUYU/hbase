@@ -94,11 +94,17 @@ class WALEntryStream implements Closeable {
     this.serverName = serverName;
     this.metrics = metrics;
     this.walGroupId = walGroupId;
+    //Print all the string for logQueue, fs, currentPath, currentPositionOfEntry, walFileLengthProvider, serverName, metrics
+    LOG.info("Failure Recovery logQueue={}, fs={}, currentPath={}, currentPositionOfEntry={}, walFileLengthProvider={}, serverName={}, metrics={}",
+      logQueue, fs, currentPath, currentPositionOfEntry, walFileLengthProvider, serverName, metrics);
+
   }
 
   /** Returns true if there is another WAL {@link Entry} */
   public boolean hasNext() throws IOException {
+    LOG.info("entering hasNext");
     if (currentEntry == null) {
+      LOG.info("tryAdvanceEntry is");
       tryAdvanceEntry();
     }
     return currentEntry != null;
@@ -169,8 +175,11 @@ class WALEntryStream implements Closeable {
   }
 
   private void tryAdvanceEntry() throws IOException {
-    if (checkReader()) {
+    boolean checkReader = checkReader();
+    LOG.info("checkReader is {}", checkReader);
+    if (checkReader) {
       boolean beingWritten = readNextEntryAndRecordReaderPosition();
+      LOG.info("Reading WAL {}; currently open for write={}", this.currentPath, beingWritten);
       LOG.trace("Reading WAL {}; currently open for write={}", this.currentPath, beingWritten);
       if (currentEntry == null && !beingWritten) {
         // no more entries in this log file, and the file is already closed, i.e, rolled
@@ -178,9 +187,13 @@ class WALEntryStream implements Closeable {
         // This is in case more entries came in after we opened the reader, and the log is rolled
         // while we were reading. See HBASE-6758
         resetReader();
+        LOG.info("Reading WAL {}; no more entries in this log file, and the file is already closed, i.e, rolled", this.currentPath);
         readNextEntryAndRecordReaderPosition();
+        LOG.info("readNextEntryAndRecordReaderPosition");
         if (currentEntry == null) {
-          if (checkAllBytesParsed()) { // now we're certain we're done with this log file
+          LOG.info("checkAllBytesParsed is {}", checkAllBytesParsed());
+          if (checkAllBytesParsed()) {// now we're certain we're done with this log file
+            LOG.info("dequeueCurrentLog is");
             dequeueCurrentLog();
             if (openNextLog()) {
               readNextEntryAndRecordReaderPosition();
@@ -257,6 +270,7 @@ class WALEntryStream implements Closeable {
    */
   private boolean readNextEntryAndRecordReaderPosition() throws IOException {
     Entry readEntry = reader.next();
+    LOG.info("readEntry is {}", readEntry);
     long readerPos = reader.getPosition();
     OptionalLong fileLength;
     if (logQueue.getQueueSize(walGroupId) > 1) {
@@ -281,6 +295,7 @@ class WALEntryStream implements Closeable {
       metrics.incrLogReadInBytes(readerPos - currentPositionOfEntry);
     }
     currentEntry = readEntry; // could be null
+    LOG.info("currentEntry is {}", currentEntry);
     this.currentPositionOfReader = readerPos;
     return fileLength.isPresent();
   }
@@ -303,7 +318,9 @@ class WALEntryStream implements Closeable {
   // open a reader on the next log in queue
   private boolean openNextLog() throws IOException {
     PriorityBlockingQueue<Path> queue = logQueue.getQueue(walGroupId);
+    LOG.info("queue is {}", queue);
     Path nextPath = queue.peek();
+    LOG.info("nextPath is {}", nextPath);
     if (nextPath != null) {
       openReader(nextPath);
       if (reader != null) {
@@ -330,6 +347,8 @@ class WALEntryStream implements Closeable {
   @edu.umd.cs.findbugs.annotations.SuppressWarnings(value = "DCN_NULLPOINTER_EXCEPTION",
       justification = "HDFS-4380")
   private void openReader(Path path) throws IOException {
+    LOG.info("Failure Recovery fs={}, path={}, currentPositionOfEntry={}, walGroupId={}",
+      fs, path, currentPositionOfEntry, walGroupId);
     try {
       // Detect if this is a new file, if so get a new reader else
       // reset the current reader so that we see the new data
@@ -339,11 +358,14 @@ class WALEntryStream implements Closeable {
         seek();
         setCurrentPath(path);
       } else {
+        LOG.info("Reopen the reader for path {}", path);
         resetReader();
       }
     } catch (FileNotFoundException fnfe) {
+      LOG.info("Throwing FileNotFoundException for path {}", path);
       handleFileNotFound(path, fnfe);
     } catch (RemoteException re) {
+      LOG.info("Throwing RemoteException for path {}", path);
       IOException ioe = re.unwrapRemoteException(FileNotFoundException.class);
       if (!(ioe instanceof FileNotFoundException)) {
         throw ioe;

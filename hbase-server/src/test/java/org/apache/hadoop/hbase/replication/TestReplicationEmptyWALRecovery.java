@@ -29,6 +29,7 @@ import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.Waiter;
 import org.apache.hadoop.hbase.client.RegionInfo;
 import org.apache.hadoop.hbase.client.RegionInfoBuilder;
+import org.apache.hadoop.hbase.metrics.Interns;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.regionserver.MultiVersionConcurrencyControl;
 import org.apache.hadoop.hbase.regionserver.wal.AbstractFSWAL;
@@ -127,6 +128,7 @@ public class TestReplicationEmptyWALRecovery extends TestReplicationBase {
   @Test
   public void testEmptyWALRecovery() throws Exception {
     final int numRs = UTIL1.getHBaseCluster().getRegionServerThreads().size();
+    LOG.info("numRs is " + numRs);
     // for each RS, create an empty wal with same walGroupId
     final List<Path> emptyWalPaths = new ArrayList<>();
     long ts = EnvironmentEdgeManager.currentTime();
@@ -140,8 +142,9 @@ public class TestReplicationEmptyWALRecovery extends TestReplicationBase {
       UTIL1.getTestFileSystem().create(emptyWalPath).close();
       emptyWalPaths.add(emptyWalPath);
     }
-
+    LOG.info("Injecting empty WALs");
     injectEmptyWAL(numRs, emptyWalPaths);
+    LOG.info("Finished injecting empty WALs");
 
     // ReplicationSource should advance past the empty wal, or else the test will fail
     waitForLogAdvance(numRs);
@@ -150,7 +153,9 @@ public class TestReplicationEmptyWALRecovery extends TestReplicationBase {
     // if everything works, the source should've stopped reading from the empty wal, and start
     // replicating from the new wal
     runSimplePutDeleteTest();
+    LOG.info("Before rollWalsAndWaitForDeque");
     rollWalsAndWaitForDeque(numRs);
+    LOG.info("Finished rollWalsAndWaitForDeque");
   }
 
   /**
@@ -208,6 +213,10 @@ public class TestReplicationEmptyWALRecovery extends TestReplicationBase {
     runSimplePutDeleteTest();
     rollWalsAndWaitForDeque(numRs);
   }
+  @Test
+  public void test(){
+    System.out.println("mock test here");
+  }
 
   /**
    * Test empty WAL along with non empty WALs in the same batch. This test is to make sure when we
@@ -218,6 +227,8 @@ public class TestReplicationEmptyWALRecovery extends TestReplicationBase {
   @Test
   public void testReplicationOfEmptyWALFollowedByNonEmptyWAL() throws Exception {
     // Disable the replication peer to accumulate the non empty WAL followed by empty WAL
+    LOG.info("Before testReplicationOfEmptyWALFollowedByNonEmptyWAL");
+    System.out.println("Enter testReplicationOfEmptyWALFollowedByNonEmptyWAL");
     hbaseAdmin.disableReplicationPeer(PEER_ID2);
     int numOfEntriesToReplicate = 20;
 
@@ -238,11 +249,14 @@ public class TestReplicationEmptyWALRecovery extends TestReplicationBase {
       emptyWalPaths.add(emptyWalPath);
 
     }
+    System.out.println("Failure Recovery, injectEmptyWAL");
     injectEmptyWAL(numRs, emptyWalPaths);
+    System.out.println("Failure Recovery, finish injectEmptyWAL");
     // roll the WAL now
     for (int i = 0; i < numRs; i++) {
       wal.rollWriter();
     }
+    System.out.println("Failure Recovery, finish rollWriter");
     hbaseAdmin.enableReplicationPeer(PEER_ID2);
     // ReplicationSource should advance past the empty wal, or else the test will fail
     waitForLogAdvance(numRs);
@@ -261,6 +275,7 @@ public class TestReplicationEmptyWALRecovery extends TestReplicationBase {
     // if everything works, the source should've stopped reading from the empty wal, and start
     // replicating from the new wal
     runSimplePutDeleteTest();
+    System.out.println("Before rollWalsAndWaitForDeque");
     rollWalsAndWaitForDeque(numRs);
   }
 
@@ -350,6 +365,7 @@ public class TestReplicationEmptyWALRecovery extends TestReplicationBase {
       WAL wal = UTIL1.getHBaseCluster().getRegionServer(i).getWAL(regionInfo);
       wal.rollWriter();
     }
+    System.out.println("Before waitForLogAdvance");
     waitForLogAdvance(numRs);
   }
 

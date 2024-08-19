@@ -387,6 +387,7 @@ public class FSHLog extends AbstractFSWAL<Writer> {
         inflightWALClosures.put(oldPath.getName(), writer);
         if (isUnflushedEntries() || closeErrorCount.get() >= this.closeErrorsTolerated) {
           try {
+            LOG.info("Closing writer {} at path {}", writer, oldPath);
             closeWriter(this.writer, oldPath, true);
           } finally {
             inflightWALClosures.remove(oldPath.getName());
@@ -398,6 +399,7 @@ public class FSHLog extends AbstractFSWAL<Writer> {
           Writer localWriter = this.writer;
           closeExecutor.execute(() -> {
             try {
+              LOG.info("Closing writer {} at path {}", localWriter, oldPath);
               closeWriter(localWriter, oldPath, false);
             } catch (IOException e) {
               LOG.warn("close old writer failed", e);
@@ -410,6 +412,7 @@ public class FSHLog extends AbstractFSWAL<Writer> {
           });
         }
       } else {
+        LOG.info("Closing writer {} at path {}", writer, oldPath);
         logRollAndSetupWalProps(oldPath, newPath, 0);
       }
 

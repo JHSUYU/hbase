@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.replication.regionserver;
 
 import static org.mockito.Mockito.mock;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.util.NavigableMap;
 import java.util.TreeMap;
@@ -91,10 +92,23 @@ public abstract class WALEntryStreamTestBase {
 
     @Override
     public Entry next() {
-      Waiter.waitFor(CONF, TEST_TIMEOUT_MS, () -> {
-        result = WALEntryStreamWithRetries.super.next();
-        return result != null;
-      });
+//      Waiter.waitFor(CONF, TEST_TIMEOUT_MS, () -> {
+//        result = WALEntryStreamWithRetries.super.next();
+//        return result != null;
+//      });
+      try{
+        Entry entry = null;
+        while(entry == null) {
+          entry = WALEntryStreamWithRetries.super.next();
+          result = entry;
+          System.out.println("Failure Recovery: entry is " + entry);
+          if(entry == null) Thread.sleep(100); // 等待一段时间再重试
+        }
+      } catch (IOException | InterruptedException e) {
+        System.out.println("Failure Recovery: next() failed, e is " + e);
+        e.printStackTrace();
+      }
+
       return result;
     }
   }

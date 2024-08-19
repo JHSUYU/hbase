@@ -65,7 +65,7 @@ import org.apache.hbase.thirdparty.com.google.common.io.Closeables;
  * other tests should have their own classes and extend this one
  */
 public class TestReplicationBase {
-  private static final Logger LOG = LoggerFactory.getLogger(TestReplicationBase.class);
+  public static final Logger LOG = LoggerFactory.getLogger(TestReplicationBase.class);
   protected static Connection connection1;
   protected static Connection connection2;
   protected static Configuration CONF_WITH_LOCALFS;

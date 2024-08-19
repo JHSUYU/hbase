@@ -109,6 +109,9 @@ public abstract class ReaderBase implements AbstractFSWALProvider.Reader {
         LOG.info("Got an old ROOT edit, ignoring ");
         return next(e);
       } else throw iae;
+    } catch (IOException e1) {
+      LOG.info("Got exception while reading WAL, ignoring ", e1);
+      throw e1;
     }
     edit++;
     if (compressionContext != null && emptyCompressionContext) {
