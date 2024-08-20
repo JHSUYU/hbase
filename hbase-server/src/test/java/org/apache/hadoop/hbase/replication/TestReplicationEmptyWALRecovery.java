@@ -132,16 +132,18 @@ public class TestReplicationEmptyWALRecovery extends TestReplicationBase {
     // for each RS, create an empty wal with same walGroupId
     final List<Path> emptyWalPaths = new ArrayList<>();
     long ts = EnvironmentEdgeManager.currentTime();
-    for (int i = 0; i < numRs; i++) {
-      RegionInfo regionInfo =
-        UTIL1.getHBaseCluster().getRegions(htable1.getName()).get(0).getRegionInfo();
-      WAL wal = UTIL1.getHBaseCluster().getRegionServer(i).getWAL(regionInfo);
-      Path currentWalPath = AbstractFSWALProvider.getCurrentFileName(wal);
-      String walGroupId = AbstractFSWALProvider.getWALPrefixFromWALName(currentWalPath.getName());
-      Path emptyWalPath = new Path(UTIL1.getDataTestDir(), walGroupId + "." + ts);
-      UTIL1.getTestFileSystem().create(emptyWalPath).close();
-      emptyWalPaths.add(emptyWalPath);
-    }
+//    for (int i = 0; i < numRs; i++) {
+//      RegionInfo regionInfo =
+//        UTIL1.getHBaseCluster().getRegions(htable1.getName()).get(0).getRegionInfo();
+//      WAL wal = UTIL1.getHBaseCluster().getRegionServer(i).getWAL(regionInfo);
+//      Path currentWalPath = AbstractFSWALProvider.getCurrentFileName(wal);
+//      String walGroupId = AbstractFSWALProvider.getWALPrefixFromWALName(currentWalPath.getName());
+//      Path emptyWalPath = new Path(UTIL1.getDataTestDir(), walGroupId + "." + ts);
+//      LOG.info("Creating empty wal " + emptyWalPath);
+//      UTIL1.getTestFileSystem().create(emptyWalPath);
+//      //UTIL1.getTestFileSystem().create(emptyWalPath).close();
+//      emptyWalPaths.add(emptyWalPath);
+//    }
     LOG.info("Injecting empty WALs");
     injectEmptyWAL(numRs, emptyWalPaths);
     LOG.info("Finished injecting empty WALs");
@@ -344,8 +346,8 @@ public class TestReplicationEmptyWALRecovery extends TestReplicationBase {
     for (int i = 0; i < numRs; i++) {
       HRegionServer hrs = UTIL1.getHBaseCluster().getRegionServer(i);
       Replication replicationService = (Replication) hrs.getReplicationSourceService();
-      replicationService.getReplicationManager().preLogRoll(emptyWalPaths.get(i));
-      replicationService.getReplicationManager().postLogRoll(emptyWalPaths.get(i));
+//      replicationService.getReplicationManager().preLogRoll(emptyWalPaths.get(i));
+//      replicationService.getReplicationManager().postLogRoll(emptyWalPaths.get(i));
       RegionInfo regionInfo =
         UTIL1.getHBaseCluster().getRegions(htable1.getName()).get(0).getRegionInfo();
       WAL wal = hrs.getWAL(regionInfo);

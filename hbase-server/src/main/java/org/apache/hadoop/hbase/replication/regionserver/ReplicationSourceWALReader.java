@@ -88,6 +88,12 @@ class ReplicationSourceWALReader extends Thread {
 
   AtomicBoolean waitingPeerEnabled = new AtomicBoolean(false);
 
+  public ReplicationSourceWALReader deepCopy() {
+    ReplicationSourceWALReader replicationSourceWALReader = new ReplicationSourceWALReader(fs, conf, logQueue, currentPosition, filter, source, walGroupId);
+    replicationSourceWALReader.setReaderRunning(isReaderRunning);
+    return replicationSourceWALReader;
+  }
+
   /**
    * Creates a reader worker for a given WAL queue. Reads WAL entries off a given queue, batches the
    * entries, and puts them on a batch queue.
@@ -98,6 +104,8 @@ class ReplicationSourceWALReader extends Thread {
    * @param filter        The filter to use while reading
    * @param source        replication source
    */
+
+
   public ReplicationSourceWALReader(FileSystem fs, Configuration conf,
     ReplicationSourceLogQueue logQueue, long startPosition, WALEntryFilter filter,
     ReplicationSource source, String walGroupId) {
@@ -152,7 +160,7 @@ class ReplicationSourceWALReader extends Thread {
           }
           LOG.info("before tryAdvanceStreamAndCreateWALBatch");
           batch = tryAdvanceStreamAndCreateWALBatch(entryStream);
-          LOG.info("after tryAdvanceStreamAndCreateWALBatch");
+          //LOG.info("after tryAdvanceStreamAndCreateWALBatch");
           LOG.info("batch is "+batch);
           if (batch == null) {
             // got no entries and didn't advance position in WAL
@@ -195,6 +203,21 @@ class ReplicationSourceWALReader extends Thread {
           }
         }
       } catch (WALEntryFilterRetryableException | IOException e) {// stream related
+        ReplicationSourceWALReader shadowReplicationSourceWALReader = this.deepCopy();
+        Thread dryRunThread = new Thread(() -> {
+          try{
+            shadowReplicationSourceWALReader.run();
+          } catch (Exception e1) {
+            e1.printStackTrace();
+          }
+        });
+        dryRunThread.start();
+        try {
+          dryRunThread.join();
+        } catch (InterruptedException ex) {
+          //We will get NPE in dry run thread;
+        }
+
         System.out.println("Encountered stream related exception while reading WAL, retrying the e is " + e);
         if (!handleEofException(e, batch)) {
           LOG.warn("Failed to read stream of replication entries", e);
