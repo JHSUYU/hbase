@@ -400,6 +400,7 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
   private Call callMethod(final Descriptors.MethodDescriptor md, final HBaseRpcController hrc,
     final Message param, Message returnType, final User ticket, final Address addr,
     final RpcCallback<Message> callback) {
+    LOG.info("Failure Recovery in AbstractRpcClient.java isDryRun is "+TraceUtil.isDryRun());
     Span span = new IpcClientSpanBuilder().setMethodDescriptor(md).setRemoteAddress(addr).build();
     try (Scope scope = span.makeCurrent()) {
       final MetricsConnection.CallStats cs = MetricsConnection.newCallStats();
@@ -441,6 +442,7 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
         }
         cs.setConcurrentCallsPerServer(count);
         T connection = getConnection(remoteId);
+        LOG.info("Failure Recovery, connection type is "+connection.getClass().getName());
         connection.sendRequest(call, hrc);
       } catch (Exception e) {
         call.setException(toIOE(e));

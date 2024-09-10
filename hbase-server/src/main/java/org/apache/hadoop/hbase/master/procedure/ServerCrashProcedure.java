@@ -45,6 +45,7 @@ import org.apache.hadoop.hbase.procedure2.ProcedureStateSerializer;
 import org.apache.hadoop.hbase.procedure2.ProcedureSuspendedException;
 import org.apache.hadoop.hbase.procedure2.ProcedureYieldException;
 import org.apache.hadoop.hbase.procedure2.StateMachineProcedure;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -113,6 +114,9 @@ public class ServerCrashProcedure extends
    */
   public ServerCrashProcedure(final MasterProcedureEnv env, final ServerName serverName,
     final boolean shouldSplitWal, final boolean carryingMeta) {
+    if(TraceUtil.isDryRun()){
+        TraceUtil.addToDryRunSet(this);
+    }
     this.serverName = serverName;
     this.shouldSplitWal = shouldSplitWal;
     this.carryingMeta = carryingMeta;
@@ -133,6 +137,7 @@ public class ServerCrashProcedure extends
   @Override
   protected Flow executeFromState(MasterProcedureEnv env, ServerCrashState state)
     throws ProcedureSuspendedException, ProcedureYieldException {
+    LOG.info("Failure Recovery, executeFromState in ServerCrashProcedure isDryRun is {}", TraceUtil.isDryRun());
     final MasterServices services = env.getMasterServices();
     final AssignmentManager am = env.getAssignmentManager();
     updateProgress(true);
@@ -156,12 +161,14 @@ public class ServerCrashProcedure extends
           throw new ProcedureSuspendedException();
         }
     }
+    LOG.info("Failure Recovery, state is {}", state);
     try {
       switch (state) {
         case SERVER_CRASH_START:
           LOG.info("Start " + this);
           // If carrying meta, process it first. Else, get list of regions on crashed server.
           if (this.carryingMeta) {
+            //go here
             setNextState(ServerCrashState.SERVER_CRASH_SPLIT_META_LOGS);
           } else {
             setNextState(ServerCrashState.SERVER_CRASH_GET_REGIONS);
@@ -172,9 +179,12 @@ public class ServerCrashProcedure extends
             env.getMasterConfiguration().getBoolean(HBASE_SPLIT_WAL_COORDINATED_BY_ZK,
               DEFAULT_HBASE_SPLIT_COORDINATED_BY_ZK)
           ) {
+            LOG.info("Failure Recovery, split meta logs using zk");
             zkCoordinatedSplitMetaLogs(env);
             setNextState(ServerCrashState.SERVER_CRASH_ASSIGN_META);
           } else {
+            //go there
+            LOG.info("Failure Recovery, split meta logs using procedures");
             am.getRegionStates().metaLogSplitting(serverName);
             addChildProcedure(createSplittingWalProcedures(env, true));
             setNextState(ServerCrashState.SERVER_CRASH_DELETE_SPLIT_META_WALS_DIR);
@@ -182,29 +192,37 @@ public class ServerCrashProcedure extends
           break;
         case SERVER_CRASH_DELETE_SPLIT_META_WALS_DIR:
           if (isSplittingDone(env, true)) {
+            //go there
+            LOG.info("Failure Recovery, split meta logs done");
             setNextState(ServerCrashState.SERVER_CRASH_ASSIGN_META);
             am.getRegionStates().metaLogSplit(serverName);
           } else {
+            LOG.info("Failure Recovery, split meta logs not done");
             setNextState(ServerCrashState.SERVER_CRASH_SPLIT_META_LOGS);
           }
           break;
         case SERVER_CRASH_ASSIGN_META:
+          //go there
           assignRegions(env, Arrays.asList(RegionInfoBuilder.FIRST_META_REGIONINFO));
           setNextState(ServerCrashState.SERVER_CRASH_GET_REGIONS);
           break;
         case SERVER_CRASH_GET_REGIONS:
+          // go there
           this.regionsOnCrashedServer = getRegionsOnCrashedServer(env);
           // Where to go next? Depends on whether we should split logs at all or
           // if we should do distributed log splitting.
           if (regionsOnCrashedServer != null) {
-            LOG.info("{} had {} regions", serverName, regionsOnCrashedServer.size());
+            LOG.info("Failure Recovery {} had {} regions", serverName, regionsOnCrashedServer.size());
             if (LOG.isTraceEnabled()) {
               this.regionsOnCrashedServer.stream().forEach(ri -> LOG.trace(ri.getShortNameToLog()));
             }
           }
           if (!this.shouldSplitWal) {
+            LOG.info("Failure Recovery, skip split logs");
             setNextState(ServerCrashState.SERVER_CRASH_ASSIGN);
           } else {
+            //go there
+            LOG.info("Failure Recovery, split logs");
             setNextState(ServerCrashState.SERVER_CRASH_SPLIT_LOGS);
           }
           break;
@@ -213,20 +231,26 @@ public class ServerCrashProcedure extends
             env.getMasterConfiguration().getBoolean(HBASE_SPLIT_WAL_COORDINATED_BY_ZK,
               DEFAULT_HBASE_SPLIT_COORDINATED_BY_ZK)
           ) {
+            LOG.info("Failure Recovery, split logs using zk");
             zkCoordinatedSplitLogs(env);
             setNextState(ServerCrashState.SERVER_CRASH_ASSIGN);
           } else {
+            //go there
+            LOG.info("Failure Recovery, split logs using procedures");
             am.getRegionStates().logSplitting(this.serverName);
             addChildProcedure(createSplittingWalProcedures(env, false));
             setNextState(ServerCrashState.SERVER_CRASH_DELETE_SPLIT_WALS_DIR);
           }
           break;
         case SERVER_CRASH_DELETE_SPLIT_WALS_DIR:
+          //go there
           if (isSplittingDone(env, false)) {
+            LOG.info("Failure Recovery, split logs done");
             cleanupSplitDir(env);
             setNextState(ServerCrashState.SERVER_CRASH_ASSIGN);
             am.getRegionStates().logSplit(this.serverName);
           } else {
+            LOG.info("Failure Recovery, split logs not done");
             setNextState(ServerCrashState.SERVER_CRASH_SPLIT_LOGS);
           }
           break;
@@ -241,6 +265,7 @@ public class ServerCrashProcedure extends
             }
             assignRegions(env, regionsOnCrashedServer);
           }
+          LOG.info("Failure Recovery, assigned regions");
           setNextState(ServerCrashState.SERVER_CRASH_CLAIM_REPLICATION_QUEUES);
           break;
         case SERVER_CRASH_HANDLE_RIT2:

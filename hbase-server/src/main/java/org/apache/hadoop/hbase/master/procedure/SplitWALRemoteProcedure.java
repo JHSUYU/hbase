@@ -19,9 +19,13 @@ package org.apache.hadoop.hbase.master.procedure;
 
 import java.io.IOException;
 import java.util.Optional;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Scope;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.ServerName;
+import org.apache.hadoop.hbase.dryrun.DryRunTracer;
 import org.apache.hadoop.hbase.procedure2.ProcedureStateSerializer;
 import org.apache.hadoop.hbase.procedure2.RemoteProcedureDispatcher;
 import org.apache.hadoop.hbase.regionserver.SplitWALCallable;
@@ -34,6 +38,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ErrorHandlingProtos;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProcedureProtos;
+import static org.apache.hadoop.hbase.dryrun.DryRunTracer.DRY_RUN_KEY;
 
 /**
  * A remote procedure which is used to send split WAL request to region server. It will return null
@@ -47,6 +52,7 @@ public class SplitWALRemoteProcedure extends ServerRemoteProcedure
   private static final Logger LOG = LoggerFactory.getLogger(SplitWALRemoteProcedure.class);
   private String walPath;
   private ServerName crashedServer;
+  public boolean isDryRun = false;
 
   public SplitWALRemoteProcedure() {
   }
@@ -99,7 +105,7 @@ public class SplitWALRemoteProcedure extends ServerRemoteProcedure
     ServerName serverName) {
     return Optional.of(new RSProcedureDispatcher.ServerOperation(this, getProcId(),
       SplitWALCallable.class, MasterProcedureProtos.SplitWALParameter.newBuilder()
-        .setWalPath(walPath).build().toByteArray()));
+      .setWalPath(walPath).build().toByteArray()));
   }
 
   @Override

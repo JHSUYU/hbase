@@ -19,8 +19,11 @@ package org.apache.hadoop.hbase.ipc;
 
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
+import io.opentelemetry.api.baggage.Baggage;
+import io.opentelemetry.context.Context;
 import org.apache.hadoop.hbase.Abortable;
 import org.apache.hadoop.hbase.monitoring.MonitoredRPCHandler;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -74,6 +77,10 @@ public class RpcHandler extends Thread {
 
   @Override
   public void run() {
+    Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
+    dryRunBaggage.makeCurrent();
+    Context dryRunContext = Context.current();
+    dryRunContext.with(dryRunBaggage);
     boolean interrupted = false;
     running = true;
     try {

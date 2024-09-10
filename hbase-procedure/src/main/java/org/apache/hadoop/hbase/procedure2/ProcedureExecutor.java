@@ -40,6 +40,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import io.opentelemetry.api.baggage.Baggage;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.exceptions.IllegalArgumentIOException;
@@ -221,12 +224,16 @@ public class ProcedureExecutor<TEnvironment> {
    */
   private CopyOnWriteArrayList<WorkerThread> workerThreads;
 
+  public CopyOnWriteArrayList<WorkerThread> workerThreads$instrumentation;
+
   /**
    * Created in the {@link #init(int, boolean)} method. Terminated in {@link #join()} (FIX! Doing
    * resource handling rather than observing in a #join is unexpected). Overridden when we do the
    * ProcedureTestingUtility.testRecoveryAndDoubleExecution trickery (Should be ok).
    */
   private TimeoutExecutorThread<TEnvironment> timeoutExecutor;
+
+  private TimeoutExecutorThread<TEnvironment> timeoutExecutor$instrumentation;
 
   /**
    * WorkerMonitor check for stuck workers and new worker thread when necessary, for example if
@@ -236,6 +243,11 @@ public class ProcedureExecutor<TEnvironment> {
    * use a dedicated thread for executing WorkerMonitor.
    */
   private TimeoutExecutorThread<TEnvironment> workerMonitorExecutor;
+
+  private TimeoutExecutorThread<TEnvironment> getWorkerMonitorExecutor$instrumentation;
+
+  public Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
+
 
   private int corePoolSize;
   private int maxPoolSize;
@@ -682,6 +694,10 @@ public class ProcedureExecutor<TEnvironment> {
     workerMonitorExecutor.start();
     for (WorkerThread worker : workerThreads) {
       worker.start();
+    }
+    Context context = Context.current();
+    for(WorkerThread worker : workerThreads) {
+      context.wrap(worker);
     }
 
     // Internal chores
@@ -1153,6 +1169,7 @@ public class ProcedureExecutor<TEnvironment> {
     assert !procedures.containsKey(currentProcId);
     procedures.put(currentProcId, proc);
     sendProcedureAddedNotification(currentProcId);
+    LOG.info("Failure Recovery, scheduler class name is {}", scheduler.getClass().getName());
     scheduler.addBack(proc);
     return proc.getProcId();
   }
@@ -1399,6 +1416,11 @@ public class ProcedureExecutor<TEnvironment> {
       return;
     }
     final Long rootProcId = getRootProcedureId(proc);
+    LOG.debug("Failure Recovery, in ProcedureExecutor, current proc is {}, rootProcId is {}, isDryRun is {}",
+      proc, rootProcId, TraceUtil.isInDryRunSet(proc));
+    LOG.debug("Failure Recovery, baggage version is dry run is"+TraceUtil.isDryRun());
+    Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
+    Context dryRunContext = Context.current().with(dryRunBaggage);
     if (rootProcId == null) {
       // The 'proc' was ready to run but the root procedure was rolledback
       LOG.warn("Rollback because parent is done/rolledback proc=" + proc);
@@ -1414,7 +1436,10 @@ public class ProcedureExecutor<TEnvironment> {
     do {
       // Try to acquire the execution
       if (!procStack.acquire(proc)) {
+        LOG.debug("proc stack is "+procStack);
+        LOG.debug("Can't acquire the execution lock for " + proc);
         if (procStack.setRollback()) {
+          LOG.debug("Set rollback for " + proc);
           // we have the 'rollback-lock' we can start rollingback
           switch (executeRollback(rootProcId, procStack)) {
             case LOCK_ACQUIRED:
@@ -1431,6 +1456,7 @@ public class ProcedureExecutor<TEnvironment> {
               throw new UnsupportedOperationException();
           }
         } else {
+          LOG.debug("Can't set rollback for " + proc);
           // if we can't rollback means that some child is still running.
           // the rollback will be executed after all the children are done.
           // If the procedure was never executed, remove and mark it as rolledback.
@@ -1457,6 +1483,7 @@ public class ProcedureExecutor<TEnvironment> {
       // Note that lock is NOT about concurrency but rather about ensuring
       // ownership of a procedure of an entity such as a region or table
       LockState lockState = acquireLock(proc);
+      LOG.debug("Failure Recovery, acquireLock for proc is {}, lockState is {}", proc, lockState);
       switch (lockState) {
         case LOCK_ACQUIRED:
           execProcedure(procStack, proc);
@@ -1777,7 +1804,9 @@ public class ProcedureExecutor<TEnvironment> {
     boolean reExecute = false;
 
     Procedure<TEnvironment>[] subprocs = null;
+    LOG.debug("Failure Recovery, in execProcedure, current proc is {}, isDryRun is {}", procedure, TraceUtil.isInDryRunSet(procedure));
     do {
+      LOG.info("FL, enter execProcedure Loop again");
       reExecute = false;
       procedure.resetPersistence();
       try {
@@ -1805,12 +1834,14 @@ public class ProcedureExecutor<TEnvironment> {
       }
 
       if (!procedure.isFailed()) {
+        LOG.debug("Failure Recovery, procedure is not failed, subprocs is {}", subprocs);
         if (subprocs != null) {
           if (subprocs.length == 1 && subprocs[0] == procedure) {
             // Procedure returned itself. Quick-shortcut for a state machine-like procedure;
             // i.e. we go around this loop again rather than go back out on the scheduler queue.
             subprocs = null;
             reExecute = true;
+            LOG.debug("Failure Recovery, subprocs is null, reExecute is true");
             LOG.trace("Short-circuit to next step on pid={}", procedure.getProcId());
           } else {
             // Yield the current procedure, and make the subprocedure runnable
@@ -1847,6 +1878,7 @@ public class ProcedureExecutor<TEnvironment> {
       // Commit the transaction even if a suspend (state may have changed). Note this append
       // can take a bunch of time to complete.
       if (procedure.needPersistence()) {
+        LOG.debug("Failure Recovery, in execProcedure, needPersistence is true, procedure is {}", procedure);
         // Add the procedure to the stack
         // See HBASE-28210 on why we need synchronized here
         boolean needUpdateStoreOutsideLock = false;
@@ -1876,6 +1908,7 @@ public class ProcedureExecutor<TEnvironment> {
         procedure.isRunnable() && !suspended
           && procedure.isYieldAfterExecutionStep(getEnvironment())
       ) {
+        LOG.debug("Yield after execution step {}", procedure);
         yieldProcedure(procedure);
         return;
       }
@@ -1892,6 +1925,7 @@ public class ProcedureExecutor<TEnvironment> {
 
     // Submit the new subprocedures
     if (subprocs != null && !procedure.isFailed()) {
+      LOG.debug("Failure Recovery, in execProcedure, subprocs is not null, submitChildrenProcedures is called");
       submitChildrenProcedures(subprocs);
     }
 
@@ -1923,6 +1957,7 @@ public class ProcedureExecutor<TEnvironment> {
         String msg = "subproc[" + i + "] is null, aborting the procedure";
         procedure
           .setFailure(new RemoteProcedureException(msg, new IllegalArgumentIOException(msg)));
+        LOG.info("FL, Failed to initialize subprocedure pid={}, aborting the procedure", procedure);
         return null;
       }
 
@@ -2076,7 +2111,8 @@ public class ProcedureExecutor<TEnvironment> {
 
   // ==========================================================================
   // Worker Thread
-  // ==========================================================================
+  // ===========================================================================
+
   private class WorkerThread extends StoppableThread {
     private final AtomicLong executionStartTime = new AtomicLong(Long.MAX_VALUE);
     private volatile Procedure<TEnvironment> activeProcedure;
@@ -2125,23 +2161,27 @@ public class ProcedureExecutor<TEnvironment> {
 
     @Override
     public void run() {
-      long lastUpdate = EnvironmentEdgeManager.currentTime();
-      try {
-        while (isRunning() && keepAlive(lastUpdate)) {
-          @SuppressWarnings("unchecked")
-          Procedure<TEnvironment> proc = scheduler.poll(keepAliveTime, TimeUnit.MILLISECONDS);
-          if (proc == null) {
-            continue;
+      try(Scope scope = dryRunBaggage.makeCurrent()) {
+        long lastUpdate = EnvironmentEdgeManager.currentTime();
+        try {
+          while (isRunning() && keepAlive(lastUpdate)) {
+            @SuppressWarnings("unchecked") Procedure<TEnvironment> proc =
+              scheduler.poll(keepAliveTime, TimeUnit.MILLISECONDS);
+            if (proc == null) {
+              continue;
+            }
+            this.activeProcedure = proc;
+            LOG.info("FL, fetch procedure from scheduler, pid={}, state={}", proc.getProcId(),
+              proc);
+            lastUpdate = TraceUtil.trace(this::runProcedure, new ProcedureSpanBuilder(proc));
           }
-          this.activeProcedure = proc;
-          lastUpdate = TraceUtil.trace(this::runProcedure, new ProcedureSpanBuilder(proc));
+        } catch (Throwable t) {
+          LOG.warn("Worker terminating UNNATURALLY {}", this.activeProcedure, t);
+        } finally {
+          LOG.trace("Worker terminated.");
         }
-      } catch (Throwable t) {
-        LOG.warn("Worker terminating UNNATURALLY {}", this.activeProcedure, t);
-      } finally {
-        LOG.trace("Worker terminated.");
+        workerThreads.remove(this);
       }
-      workerThreads.remove(this);
     }
 
     @Override

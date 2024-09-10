@@ -29,11 +29,14 @@ import java.util.concurrent.DelayQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import io.opentelemetry.api.baggage.Baggage;
+import io.opentelemetry.context.Context;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.procedure2.util.DelayedUtil;
 import org.apache.hadoop.hbase.procedure2.util.DelayedUtil.DelayedContainerWithTimestamp;
 import org.apache.hadoop.hbase.procedure2.util.DelayedUtil.DelayedWithTimeout;
 import org.apache.hadoop.hbase.procedure2.util.StringUtils;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Threads;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -315,6 +318,11 @@ public abstract class RemoteProcedureDispatcher<TEnv, TRemote extends Comparable
 
     @Override
     public void run() {
+      Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
+      dryRunBaggage.makeCurrent();
+      Context context = Context.current();
+      context.with(dryRunBaggage);
+      LOG.info("Failure Recovery, isDryRun in TimeoutExecutorThread is " + TraceUtil.isDryRun());
       while (running.get()) {
         final DelayedWithTimeout task =
           DelayedUtil.takeWithoutInterrupt(queue, 20, TimeUnit.SECONDS);
@@ -328,8 +336,10 @@ public abstract class RemoteProcedureDispatcher<TEnv, TRemote extends Comparable
           continue;
         }
         if (task instanceof DelayedTask) {
+          LOG.info("Failure Recovery: Submitting task to thread-pool, task is: " + task);
           threadPool.execute(((DelayedTask) task).getObject());
         } else {
+          LOG.info("Failure Recovery: Dispatching task, task is: " + task);
           ((BufferNode) task).dispatch();
         }
       }

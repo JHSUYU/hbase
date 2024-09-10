@@ -70,12 +70,15 @@ class BufferCallBeforeInitHandler extends ChannelDuplexHandler {
   @Override
   public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
     if (msg instanceof Call) {
+      System.out.println("Failure Recovery, BufferCallBeforeInitHandler write");
       Call call = (Call) msg;
+      System.out.println("Failure Recovery, BufferCallBeforeInitHandler write call is "+call);
       id2Call.put(call.id, call);
       // The call is already in track so here we set the write operation as success.
       // We will fail the call directly if we can not write it out.
       promise.trySuccess();
     } else {
+      System.out.println("Failure Recovery, BufferCallBeforeInitHandler write else");
       NettyFutureUtils.consume(ctx.write(msg, promise));
     }
   }

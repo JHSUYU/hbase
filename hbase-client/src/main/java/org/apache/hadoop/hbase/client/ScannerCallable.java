@@ -42,6 +42,7 @@ import org.apache.hadoop.hbase.exceptions.ScannerResetException;
 import org.apache.hadoop.hbase.ipc.HBaseRpcController;
 import org.apache.hadoop.hbase.ipc.RpcControllerFactory;
 import org.apache.hadoop.hbase.regionserver.RegionServerStoppedException;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -247,6 +248,7 @@ public class ScannerCallable extends ClientServiceCallable<Result[]> {
 
   @Override
   protected Result[] rpcCall() throws Exception {
+    LOG.info("Failure Recovery, in ScannerCallable is Dry Run is "+ TraceUtil.isDryRun());
     if (Thread.interrupted()) {
       throw new InterruptedIOException();
     }

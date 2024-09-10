@@ -246,10 +246,12 @@ public class ReplicationSource implements ReplicationSourceInterface {
       LOG.trace("NOT replicating {}", wal);
       return;
     }
+    LOG.info("Failure recovery, wal is {}", wal);
     // Use WAL prefix as the WALGroupId for this peer.
     String walPrefix = AbstractFSWALProvider.getWALPrefixFromWALName(wal.getName());
+    LOG.info("Failure Recovery, walPrefix is {}", walPrefix);
     boolean queueExists = logQueue.enqueueLog(wal, walPrefix);
-
+    LOG.info("Failure Recovery, queueExists is {}", queueExists);
     if (!queueExists) {
       if (this.isSourceActive() && this.walEntryFilter != null) {
         // new wal group observed after source startup, start a new worker thread to track it
@@ -340,9 +342,11 @@ public class ReplicationSource implements ReplicationSourceInterface {
   private void tryStartNewShipper(String walGroupId) {
     workerThreads.compute(walGroupId, (key, value) -> {
       if (value != null) {
+        LOG.info("Failure Recovery, walGroupId {} already has a worker thread", walGroupId);
         LOG.debug("{} preempted start of shipping worker walGroupId={}", logPeerId(), walGroupId);
         return value;
       } else {
+        LOG.info("Failure Recovery, walGroupId {} start a new worker thread", walGroupId);
         LOG.debug("{} starting shipping worker for walGroupId={}", logPeerId(), walGroupId);
         ReplicationSourceShipper worker = createNewShipper(walGroupId);
         ReplicationSourceWALReader walReader =
@@ -592,6 +596,7 @@ public class ReplicationSource implements ReplicationSourceInterface {
     initializeWALEntryFilter(peerClusterId);
     // Start workers
     for (String walGroupId : logQueue.getQueues().keySet()) {
+      LOG.info("{} Starting shipping worker for walGroupId={}", logPeerId(), walGroupId);
       tryStartNewShipper(walGroupId);
     }
     setSourceStartupStatus(false);

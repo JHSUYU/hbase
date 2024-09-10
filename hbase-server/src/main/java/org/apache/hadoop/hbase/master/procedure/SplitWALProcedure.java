@@ -26,6 +26,7 @@ import org.apache.hadoop.hbase.procedure2.ProcedureSuspendedException;
 import org.apache.hadoop.hbase.procedure2.ProcedureUtil;
 import org.apache.hadoop.hbase.procedure2.ProcedureYieldException;
 import org.apache.hadoop.hbase.procedure2.StateMachineProcedure;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.RetryCounter;
 import org.apache.hadoop.hbase.wal.AbstractFSWALProvider;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -56,6 +57,7 @@ public class SplitWALProcedure
   }
 
   public SplitWALProcedure(String walPath, ServerName crashedServer) {
+    LOG.info("Failure Recovery, SplitWALProcedure constructor isDryRun is {}", TraceUtil.isDryRun());
     this.walPath = walPath;
     this.crashedServer = crashedServer;
   }
@@ -64,6 +66,7 @@ public class SplitWALProcedure
   protected Flow executeFromState(MasterProcedureEnv env, MasterProcedureProtos.SplitWALState state)
     throws ProcedureSuspendedException, ProcedureYieldException, InterruptedException {
     SplitWALManager splitWALManager = env.getMasterServices().getSplitWALManager();
+    LOG.info("Failure Recovery, SplitWALProcedure executeFromStte isDryRun is {}", TraceUtil.isDryRun());
     switch (state) {
       case ACQUIRE_SPLIT_WAL_WORKER:
         worker = splitWALManager.acquireSplitWALWorker(this);

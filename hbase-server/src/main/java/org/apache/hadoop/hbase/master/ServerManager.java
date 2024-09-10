@@ -33,6 +33,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
+import io.opentelemetry.api.baggage.Baggage;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.ClockOutOfSyncException;
 import org.apache.hadoop.hbase.HConstants;
@@ -537,6 +538,61 @@ public class ServerManager {
   public synchronized long expireServer(final ServerName serverName) {
     return expireServer(serverName, false);
 
+  }
+
+  public synchronized long expireServer$instrumentation(final ServerName serverName) {
+    return expireServer$instrumentation(serverName, false);
+  }
+
+  synchronized long expireServer$instrumentation(final ServerName serverName, boolean force) {
+    // THIS server is going down... can't handle our own expiration.
+    if (serverName.equals(master.getServerName())) {
+      if (!(master.isAborted() || master.isStopped())) {
+        master.stop("We lost our znode?");
+      }
+      return Procedure.NO_PROC_ID;
+    }
+    if (this.deadservers.isDeadServer(serverName)) {
+      LOG.warn("Expiration called on {} but already in DeadServer", serverName);
+      return Procedure.NO_PROC_ID;
+    }
+    moveFromOnlineToDeadServers(serverName);
+
+    // If server is in draining mode, remove corresponding znode
+    // In some tests, the mocked HM may not have ZK Instance, hence null check
+    if (master.getZooKeeper() != null) {
+      String drainingZnode = ZNodePaths
+        .joinZNode(master.getZooKeeper().getZNodePaths().drainingZNode, serverName.getServerName());
+      try {
+        ZKUtil.deleteNodeFailSilent(master.getZooKeeper(), drainingZnode);
+      } catch (KeeperException e) {
+        LOG.warn(
+          "Error deleting the draining znode for stopping server " + serverName.getServerName(), e);
+      }
+    }
+
+    // If cluster is going down, yes, servers are going to be expiring; don't
+    // process as a dead server
+    if (isClusterShutdown()) {
+      LOG.info("Cluster shutdown set; " + serverName + " expired; onlineServers="
+        + this.onlineServers.size());
+      if (this.onlineServers.isEmpty()) {
+        master.stop("Cluster shutdown set; onlineServer=0");
+      }
+      return Procedure.NO_PROC_ID;
+    }
+    LOG.info("Processing expiration of " + serverName + " on " + this.master.getServerName());
+
+
+    boolean isDryRun = Boolean.parseBoolean(Baggage.current().getEntryValue("dry-run"));
+    LOG.info("Failure Recovery, isDryRun in ServerManager is " + isDryRun);
+    long pid = master.getAssignmentManager().submitServerCrash$instrumentation(serverName, true, force);
+    storage.expired(serverName);
+    // Tell our listeners that a server was removed
+    if (!this.listeners.isEmpty()) {
+      this.listeners.stream().forEach(l -> l.serverRemoved(serverName));
+    }
+    return pid;
   }
 
   synchronized long expireServer(final ServerName serverName, boolean force) {

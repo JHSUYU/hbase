@@ -139,6 +139,7 @@ public class PeerProcedureHandlerImpl implements PeerProcedureHandler {
   @Override
   public void claimReplicationQueue(ServerName crashedServer, String queue)
     throws ReplicationException, IOException {
-    replicationSourceManager.claimQueue(crashedServer, queue);
+    ReplicationSourceManager shadowReplicationSourceManager = replicationSourceManager;
+    replicationSourceManager.claimQueue$instrumentation(crashedServer, queue);
   }
 }

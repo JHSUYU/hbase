@@ -97,6 +97,7 @@ public class ClaimReplicationQueuesProcedure extends Procedure<MasterProcedureEn
       ClaimReplicationQueueRemoteProcedure[] procs =
         new ClaimReplicationQueueRemoteProcedure[Math.min(queues.size(), targetServers.size())];
       for (int i = 0; i < procs.length; i++) {
+        //Add a log here
         procs[i] = new ClaimReplicationQueueRemoteProcedure(crashedServer, queues.get(i),
           targetServers.get(i));
       }

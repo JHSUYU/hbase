@@ -420,6 +420,8 @@
                 <bundled-vega>${license.bundles.vega}</bundled-vega>
                 <bundled-logo>${license.bundles.logo}</bundled-logo>
                 <bundled-bootstrap>${license.bundles.bootstrap}</bundled-bootstrap>
+                <opentracing.version>0.33.0</opentracing.version>
+                <jaeger.version>1.8.0</jaeger.version>
               </properties>
               <resourceBundles>
                 <resourceBundle>${project.groupId}:hbase-resource-bundle:${project.version}</resourceBundle>

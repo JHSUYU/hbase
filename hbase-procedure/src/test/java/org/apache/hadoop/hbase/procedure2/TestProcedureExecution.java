@@ -119,6 +119,7 @@ public class TestProcedureExecution {
     protected Procedure<Void>[] execute(Void env) {
       state.add(name + "-execute");
       if (failure != null) {
+        LOG.info("Failure Recovery, Fail with exception " + failure);
         setFailure(new RemoteProcedureException(name + "-failure", failure));
         return null;
       }

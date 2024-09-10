@@ -26,10 +26,12 @@ import static org.apache.hadoop.hbase.ipc.IPCUtil.toIOE;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import io.opentelemetry.context.Context;
 import org.apache.hadoop.hbase.ipc.BufferCallBeforeInitHandler.BufferCallEvent;
 import org.apache.hadoop.hbase.ipc.HBaseRpcController.CancellationCallback;
 import org.apache.hadoop.hbase.security.NettyHBaseRpcConnectionHeaderHandler;
@@ -163,6 +165,7 @@ class NettyRpcConnection extends RpcConnection {
         new LengthFieldBasedFrameDecoder(Integer.MAX_VALUE, 0, 4))
       .addBefore(BufferCallBeforeInitHandler.NAME, null,
         new NettyRpcDuplexHandler(this, rpcClient.cellBlockBuilder, codec, compressor))
+      .addBefore(BufferCallBeforeInitHandler.NAME, null, new NettyRpcDryRunTracerHandler())
       .fireUserEventTriggered(BufferCallEvent.success());
   }
 
@@ -320,7 +323,9 @@ class NettyRpcConnection extends RpcConnection {
     if (reloginInProgress) {
       throw new IOException(RpcConnectionConstants.RELOGIN_IS_IN_PROGRESS);
     }
+    LOG.info("Failure Recovery hrc classname is " + hrc.getClass().getName());
     hrc.notifyOnCancel(new RpcCallback<Object>() {
+    ExecutorService poolWrapped = Context.taskWrapping(Executors.newCachedThreadPool());
 
       @Override
       public void run(Object parameter) {
@@ -358,12 +363,13 @@ class NettyRpcConnection extends RpcConnection {
 
   @Override
   public void sendRequest(final Call call, HBaseRpcController hrc) {
-    execute(eventLoop, () -> {
+    Context dryRunContext = Context.current();
+    execute(eventLoop, dryRunContext.wrap(() -> {
       try {
         sendRequest0(call, hrc);
       } catch (Exception e) {
         call.setException(toIOE(e));
       }
-    });
+    }));
   }
 }

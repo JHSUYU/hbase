@@ -3123,6 +3123,10 @@ public class HMaster extends HRegionServer implements MasterServices {
     return procedureExecutor;
   }
 
+  public ProcedureExecutor<MasterProcedureEnv> getMasterProcedureExecutor$instrumentation() {
+    return procedureExecutor;
+  }
+
   @Override
   public ServerName getServerName() {
     return this.serverName;

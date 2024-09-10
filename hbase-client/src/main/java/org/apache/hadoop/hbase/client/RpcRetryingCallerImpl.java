@@ -28,9 +28,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import io.opentelemetry.api.baggage.Baggage;
+import io.opentelemetry.context.Context;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseServerException;
 import org.apache.hadoop.hbase.exceptions.PreemptiveFastFailException;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.ExceptionUtil;
 import org.apache.hadoop.ipc.RemoteException;
@@ -94,6 +97,13 @@ public class RpcRetryingCallerImpl<T> implements RpcRetryingCaller<T> {
     List<RetriesExhaustedException.ThrowableWithExtraContext> exceptions = new ArrayList<>();
     tracker.start();
     context.clear();
+    Context dryRunContext  = Context.current();
+    Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
+    dryRunBaggage.makeCurrent();
+    dryRunContext.with(dryRunBaggage);
+    LOG.info("Failure Recovery setup Dry Run Baggage: {}", dryRunBaggage);
+    LOG.info("Failure Recovery callable is: {}", callable);
+
     for (int tries = 0;; tries++) {
       long expectedSleep;
       try {

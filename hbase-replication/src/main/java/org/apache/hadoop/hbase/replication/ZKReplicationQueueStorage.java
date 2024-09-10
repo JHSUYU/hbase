@@ -397,6 +397,7 @@ class ZKReplicationQueueStorage extends ZKReplicationStorageBase
     String newQueueId = queueId + "-" + sourceServerName;
     try {
       String oldQueueNode = getQueueNode(sourceServerName, queueId);
+      LOG.info("Failure Recovery, oldQueueNode={}", oldQueueNode);
       List<String> wals = ZKUtil.listChildrenNoWatch(zookeeper, oldQueueNode);
       if (CollectionUtils.isEmpty(wals)) {
         ZKUtil.deleteNodeFailSilent(zookeeper, oldQueueNode);
@@ -404,6 +405,7 @@ class ZKReplicationQueueStorage extends ZKReplicationStorageBase
         return new Pair<>(newQueueId, Collections.emptySortedSet());
       }
       String newQueueNode = getQueueNode(destServerName, newQueueId);
+      LOG.info("Failure Recovery, newQueueNode={}", newQueueNode);
       List<ZKUtilOp> listOfOps = new ArrayList<>();
       SortedSet<String> logQueue = new TreeSet<>();
       // create the new cluster znode

@@ -18,6 +18,7 @@
 package org.apache.hadoop.hbase.ipc;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.baggage.Baggage;
 import io.opentelemetry.context.Context;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -26,6 +27,7 @@ import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.nio.channels.ClosedChannelException;
 import java.util.concurrent.TimeoutException;
+import io.opentelemetry.context.Scope;
 import org.apache.commons.lang3.mutable.MutableInt;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseIOException;
@@ -36,6 +38,7 @@ import org.apache.hadoop.hbase.exceptions.ConnectionClosedException;
 import org.apache.hadoop.hbase.exceptions.ConnectionClosingException;
 import org.apache.hadoop.hbase.exceptions.TimeoutIOException;
 import org.apache.hadoop.hbase.net.Address;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.ipc.RemoteException;
@@ -115,11 +118,21 @@ class IPCUtil {
   }
 
   static RequestHeader buildRequestHeader(Call call, CellBlockMeta cellBlockMeta) {
+    LOG.info("Failure Recovery IPCUtils.buildRequestHeader isDryRun is "+ TraceUtil.isDryRun());
     RequestHeader.Builder builder = RequestHeader.newBuilder();
     builder.setCallId(call.id);
     RPCTInfo.Builder traceBuilder = RPCTInfo.newBuilder();
-    GlobalOpenTelemetry.getPropagators().getTextMapPropagator().inject(Context.current(),
-      traceBuilder, (carrier, key, value) -> carrier.putHeaders(key, value));
+//    Context.current().with(Baggage.current());
+//    LOG.info("Client: Created Baggage: " + Baggage.current());
+//    LOG.info("Client: Created Context: " + Context.current());
+//    GlobalOpenTelemetry.getPropagators().getTextMapPropagator().inject(
+//      Context.current(),
+//      traceBuilder,
+//      (carrier, key, value) -> {
+//        carrier.putHeaders(key, value);
+//        LOG.info("Client: Injecting key: " + key + ", value: " + value);
+//      }
+//    );
     builder.setTraceInfo(traceBuilder.build());
     builder.setMethodName(call.md.getName());
     builder.setRequestParam(call.param != null);
@@ -282,6 +295,10 @@ class IPCUtil {
   static final int MAX_DEPTH = 4;
 
   static void execute(EventLoop eventLoop, Runnable action) {
+    Context context = Context.current();
+    Baggage baggage = Baggage.current();
+    LOG.info("Failure Recovery IPCUtils.execute isDryRun is "+ TraceUtil.isDryRun());
+
     if (eventLoop.inEventLoop()) {
       // this is used to prevent stack overflow, you can see the same trick in netty's LocalChannel
       // implementation.

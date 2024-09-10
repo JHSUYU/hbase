@@ -17,8 +17,10 @@
  */
 package org.apache.hadoop.hbase.master;
 
+import io.opentelemetry.api.baggage.Baggage;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -70,12 +72,15 @@ public class RegionServerTracker extends ZKListener {
   // move the operation to a single threaded thread pool in order to not block the zk event
   // processing since all the zk listener across HMaster will be called in one thread sequentially.
   private final ExecutorService executor;
+  public ExecutorService dryRunExecutor;
 
   public RegionServerTracker(ZKWatcher watcher, MasterServices server) {
     super(watcher);
     this.server = server;
     this.executor = Executors.newSingleThreadExecutor(
       new ThreadFactoryBuilder().setDaemon(true).setNameFormat("RegionServerTracker-%d").build());
+    this.dryRunExecutor = Executors.newSingleThreadExecutor(
+      new ThreadFactoryBuilder().setDaemon(true).setNameFormat("RegionServerTracker-DryRun-%d").build());
     watcher.registerListener(this);
     refresh();
   }
@@ -164,12 +169,39 @@ public class RegionServerTracker extends ZKListener {
   // execute the operations which are only needed for active masters, such as expire old servers,
   // add new servers, etc.
   private void processAsActiveMaster(Set<ServerName> newServers) {
+
     Set<ServerName> oldServers = regionServers;
+
     ServerManager serverManager = server.getServerManager();
     // expire dead servers
     for (ServerName crashedServer : Sets.difference(oldServers, newServers)) {
       LOG.info("RegionServer ephemeral node deleted, processing expiration [{}]", crashedServer);
       serverManager.expireServer(crashedServer);
+    }
+    // check whether there are new servers, log them
+    boolean newServerAdded = false;
+    for (ServerName sn : newServers) {
+      if (!oldServers.contains(sn)) {
+        newServerAdded = true;
+        LOG.info("RegionServer ephemeral node created, adding [" + sn + "]");
+      }
+    }
+    if (newServerAdded && server.isInitialized()) {
+      // Only call the check to move servers if a RegionServer was added to the cluster; in this
+      // case it could be a server with a new version so it makes sense to run the check.
+      server.checkIfShouldMoveSystemRegionAsync();
+    }
+  }
+
+  private void processAsActiveMaster$instrumentation(Set<ServerName> newServers) {
+
+    Set<ServerName> oldServers = regionServers;
+
+    ServerManager serverManager = server.getServerManager();
+    // expire dead servers
+    for (ServerName crashedServer : Sets.difference(oldServers, newServers)) {
+      LOG.info("RegionServer ephemeral node deleted, processing expiration [{}]", crashedServer);
+      serverManager.expireServer$instrumentation(crashedServer);
     }
     // check whether there are new servers, log them
     boolean newServerAdded = false;
@@ -203,7 +235,7 @@ public class RegionServerTracker extends ZKListener {
         : names.stream().map(ServerName::parseServerName)
           .collect(Collectors.collectingAndThen(Collectors.toSet(), Collections::unmodifiableSet));
       if (active) {
-        processAsActiveMaster(newServers);
+        processAsActiveMaster$instrumentation(newServers);
       }
       this.regionServers = newServers;
       span.setStatus(StatusCode.OK);
@@ -212,8 +244,67 @@ public class RegionServerTracker extends ZKListener {
     }
   }
 
+
+  private synchronized void refresh$instrumentation() {
+    List<String> names;
+    LOG.info("Failure Recovery, isDryRun in refresh is1 " + TraceUtil.isDryRun());
+    final Span span = TraceUtil.createSpan("RegionServerTracker.refresh");
+    try (final Scope ignored = span.makeCurrent()) {
+      LOG.info("Failure Recovery, isDryRun in refresh is2 " + TraceUtil.isDryRun());
+      try {
+        names = ZKUtil.listChildrenAndWatchForNewChildren(watcher, watcher.getZNodePaths().rsZNode);
+      } catch (KeeperException e) {
+        // here we need to abort as we failed to set watcher on the rs node which means that we can
+        // not track the node deleted event any more.
+        server.abort("Unexpected zk exception getting RS nodes", e);
+        return;
+      }
+      Set<ServerName> newServers = CollectionUtils.isEmpty(names)
+        ? Collections.emptySet()
+        : names.stream().map(ServerName::parseServerName)
+        .collect(Collectors.collectingAndThen(Collectors.toSet(), Collections::unmodifiableSet));
+      if (active) {
+        processAsActiveMaster$instrumentation(newServers);
+      }
+      this.regionServers = newServers;
+      span.setStatus(StatusCode.OK);
+    } finally {
+      span.end();
+    }
+  }
+
+
+  private class FailureRecoveryTask implements Runnable {
+    private final String path;
+
+    FailureRecoveryTask(String path) {
+      this.path = path;
+    }
+
+    @Override
+    public void run() {
+      LOG.info("Failure Recovery, in FailureRecoveryTask, isDryRun in run is " + TraceUtil.isDryRun());
+      if (
+        path.equals(watcher.getZNodePaths().rsZNode) && !server.isAborted() && !server.isStopped()
+      ) {
+        executor.execute(Context.current().wrap(RegionServerTracker.this::refresh$instrumentation));
+      }
+    }
+  }
+
+
   @Override
   public void nodeChildrenChanged(String path) {
+    //TODO: isolation
+    Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
+    Context dryRunContext = Context.current().with(dryRunBaggage);
+    LOG.info("Failure Recovery, isDryRun in nodeChildrenChanged is " + TraceUtil.isDryRun());
+    FailureRecoveryTask failureRecoveryTask = new FailureRecoveryTask(path);
+    //Lambda cannot be instrumented by Soot?
+    dryRunExecutor.execute(dryRunContext.wrap(failureRecoveryTask));
+    //dryRunExecutor.execute(dryRunContext.wrap(() -> nodeChildrenChanged(path)));
+
+    //Original Recovery
     if (
       path.equals(watcher.getZNodePaths().rsZNode) && !server.isAborted() && !server.isStopped()
     ) {

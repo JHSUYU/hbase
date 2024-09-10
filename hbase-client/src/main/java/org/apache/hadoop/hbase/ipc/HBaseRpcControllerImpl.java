@@ -26,6 +26,7 @@ import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.RegionInfo;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.yetus.audience.InterfaceAudience;
 
 import org.apache.hbase.thirdparty.com.google.protobuf.RpcCallback;
@@ -252,6 +253,7 @@ public class HBaseRpcControllerImpl implements HBaseRpcController {
   @Override
   public synchronized void notifyOnCancel(RpcCallback<Object> callback, CancellationCallback action)
     throws IOException {
+    System.out.println("Failure Recovery: HBaseRpcControllerImpl.notifyOnCancel isDryRun is "+ TraceUtil.isDryRun());
     if (cancelled) {
       action.run(true);
     } else {

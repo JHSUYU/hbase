@@ -23,6 +23,11 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import javax.security.sasl.SaslException;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.propagation.TextMapSetter;
 import org.apache.hadoop.hbase.CallQueueTooBigException;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.ServerName;
@@ -150,8 +155,10 @@ public class RSProcedureDispatcher extends RemoteProcedureDispatcher<MasterProce
     final Set<RemoteProcedure> remoteProcedures) {
     if (!master.getServerManager().isServerOnline(serverName)) {
       // fail fast
+      LOG.info("Failure Recovery, server is not online: {}", serverName);
       submitTask(new DeadRSRemoteCall(serverName, remoteProcedures));
     } else {
+      LOG.info("Failure Recovery, server is online: {}", serverName);
       submitTask(new ExecuteProceduresRemoteCall(serverName, remoteProcedures));
     }
   }
@@ -399,7 +406,16 @@ public class RSProcedureDispatcher extends RemoteProcedureDispatcher<MasterProce
       }
       splitAndResolveOperation(getServerName(), remoteProcedures, this);
 
+//      openTelemetry.getPropagators().getTextMapPropagator().inject(context, request, new TextMapSetter<ExecuteProceduresRequest.Builder>() {
+//        @Override
+//        public void set(ExecuteProceduresRequest.Builder carrier, String key, String value) {
+//
+//        }
+//      });
+
+
       try {
+        LOG.info("Failure Recovery, request is : {}", request.build());
         sendRequest(getServerName(), request.build());
       } catch (IOException e) {
         e = unwrapException(e);

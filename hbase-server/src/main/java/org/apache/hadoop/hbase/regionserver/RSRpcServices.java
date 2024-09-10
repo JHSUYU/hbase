@@ -142,6 +142,7 @@ import org.apache.hadoop.hbase.security.access.AccessChecker;
 import org.apache.hadoop.hbase.security.access.NoopAccessChecker;
 import org.apache.hadoop.hbase.security.access.Permission;
 import org.apache.hadoop.hbase.security.access.ZKPermissionWatcher;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.DNS;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
@@ -3532,6 +3533,7 @@ public class RSRpcServices
   @Override
   public ScanResponse scan(final RpcController controller, final ScanRequest request)
     throws ServiceException {
+    LOG.info("Failure Recovery, RSRpcServices.scan isDryRun is "+ TraceUtil.isDryRun());
     if (controller != null && !(controller instanceof HBaseRpcController)) {
       throw new UnsupportedOperationException(
         "We only do " + "HBaseRpcControllers! FIX IF A PROBLEM: " + controller);

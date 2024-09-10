@@ -141,6 +141,7 @@ public abstract class ServerCall<T extends ServerRpcConnection> implements RpcCa
     this.cellBlockBuilder = cellBlockBuilder;
     this.reqCleanup = reqCleanup;
     this.span = Span.current();
+    System.out.println("Failure Recovery, isDryRun is" + TraceUtil.isDryRun());
   }
 
   /**

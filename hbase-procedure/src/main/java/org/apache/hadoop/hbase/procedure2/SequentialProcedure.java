@@ -45,6 +45,7 @@ public abstract class SequentialProcedure<TEnvironment> extends Procedure<TEnvir
     throws ProcedureYieldException, ProcedureSuspendedException, InterruptedException {
     updateTimestamp();
     try {
+      System.out.println("Failure Recovery: SequentialProcedure.java: doExecute");
       Procedure[] children = !executed ? execute(env) : null;
       executed = !executed;
       return children;

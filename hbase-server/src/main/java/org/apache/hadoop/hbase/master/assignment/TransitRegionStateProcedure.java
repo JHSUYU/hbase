@@ -337,6 +337,8 @@ public class TransitRegionStateProcedure
     throws ProcedureSuspendedException, ProcedureYieldException, InterruptedException {
     RegionStateNode regionNode = getRegionStateNode(env);
     try {
+      LOG.info("Failure Recovery, TransitRegionStateProcedure for {}; state={}; {}; forceNewPlan={}",
+        getRegion(), state, regionNode.toShortString(), forceNewPlan);
       switch (state) {
         case REGION_STATE_TRANSITION_GET_ASSIGN_CANDIDATE:
           // Need to do some sanity check for replica region, if the region does not exist at

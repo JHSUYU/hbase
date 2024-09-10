@@ -18,6 +18,7 @@
 package org.apache.hadoop.hbase.regionserver;
 
 import java.util.concurrent.locks.Lock;
+import io.opentelemetry.api.trace.Span;
 import org.apache.hadoop.hbase.HBaseIOException;
 import org.apache.hadoop.hbase.executor.EventType;
 import org.apache.hadoop.hbase.procedure2.BaseRSProcedureCallable;

@@ -203,20 +203,20 @@ class ReplicationSourceWALReader extends Thread {
           }
         }
       } catch (WALEntryFilterRetryableException | IOException e) {// stream related
-        ReplicationSourceWALReader shadowReplicationSourceWALReader = this.deepCopy();
-        Thread dryRunThread = new Thread(() -> {
-          try{
-            shadowReplicationSourceWALReader.run();
-          } catch (Exception e1) {
-            e1.printStackTrace();
-          }
-        });
-        dryRunThread.start();
-        try {
-          dryRunThread.join();
-        } catch (InterruptedException ex) {
-          //We will get NPE in dry run thread;
-        }
+//        ReplicationSourceWALReader shadowReplicationSourceWALReader = this.deepCopy();
+//        Thread dryRunThread = new Thread(() -> {
+//          try{
+//            shadowReplicationSourceWALReader.run();
+//          } catch (Exception e1) {
+//            e1.printStackTrace();
+//          }
+//        });
+//        dryRunThread.start();
+//        try {
+//          dryRunThread.join();
+//        } catch (InterruptedException ex) {
+//          //We will get NPE in dry run thread;
+//        }
 
         System.out.println("Encountered stream related exception while reading WAL, retrying the e is " + e);
         if (!handleEofException(e, batch)) {

@@ -24,6 +24,7 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 import org.apache.hadoop.hbase.CellScanner;
 import org.apache.hadoop.hbase.client.MetricsConnection;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.yetus.audience.InterfaceAudience;
 
@@ -75,6 +76,7 @@ class Call {
     this.priority = priority;
     this.callback = callback;
     this.span = Span.current();
+    System.out.println("Failure Recovery is DryRun in call is "+ TraceUtil.isDryRun());
   }
 
   /**

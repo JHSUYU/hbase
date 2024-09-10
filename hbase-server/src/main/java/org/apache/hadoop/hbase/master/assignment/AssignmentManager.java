@@ -36,6 +36,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import io.opentelemetry.api.baggage.Baggage;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseIOException;
@@ -58,6 +59,7 @@ import org.apache.hadoop.hbase.client.TableState;
 import org.apache.hadoop.hbase.exceptions.UnexpectedStateException;
 import org.apache.hadoop.hbase.favored.FavoredNodesManager;
 import org.apache.hadoop.hbase.favored.FavoredNodesPromoter;
+import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.master.LoadBalancer;
 import org.apache.hadoop.hbase.master.MasterServices;
 import org.apache.hadoop.hbase.master.MetricsAssignmentManager;
@@ -79,6 +81,7 @@ import org.apache.hadoop.hbase.procedure2.ProcedureExecutor;
 import org.apache.hadoop.hbase.procedure2.ProcedureInMemoryChore;
 import org.apache.hadoop.hbase.procedure2.util.StringUtils;
 import org.apache.hadoop.hbase.regionserver.SequenceId;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Pair;
@@ -1892,6 +1895,68 @@ public class AssignmentManager {
           pid = procExec.submitProcedure(
             new HBCKServerCrashProcedure(mpe, serverName, shouldSplitWal, carryingMeta));
         } else {
+          pid = procExec.submitProcedure(
+            new ServerCrashProcedure(mpe, serverName, shouldSplitWal, carryingMeta));
+        }
+        LOG.info("Scheduled ServerCrashProcedure pid={} for {} (carryingMeta={}){}.", pid,
+          serverName, carryingMeta,
+          serverNode == null ? "" : " " + serverNode.toString() + ", oldState=" + oldState);
+      }
+    } finally {
+      if (serverNode != null) {
+        serverNode.writeLock().unlock();
+      }
+    }
+    return pid;
+  }
+
+  public long submitServerCrash$instrumentation(ServerName serverName, boolean shouldSplitWal, boolean force) {
+    // May be an 'Unknown Server' so handle case where serverNode is null.
+    boolean isDryRun = TraceUtil.isDryRun();
+    LOG.info("Failure Recovery, isDryRun in submitServerCrash$instrumentation is " + isDryRun);
+    ServerStateNode serverNode = regionStates.getServerNode(serverName);
+    // Remove the in-memory rsReports result
+    synchronized (rsReports) {
+      rsReports.remove(serverName);
+    }
+
+    // We hold the write lock here for fencing on reportRegionStateTransition. Once we set the
+    // server state to CRASHED, we will no longer accept the reportRegionStateTransition call from
+    // this server. This is used to simplify the implementation for TRSP and SCP, where we can make
+    // sure that, the region list fetched by SCP will not be changed any more.
+    if (serverNode != null) {
+      serverNode.writeLock().lock();
+    }
+    boolean carryingMeta;
+    long pid;
+    try {
+      ProcedureExecutor<MasterProcedureEnv> procExec = this.master.getMasterProcedureExecutor();
+      if(this.master instanceof HMaster) {
+        procExec = ((HMaster)master).getMasterProcedureExecutor$instrumentation();
+      }
+      carryingMeta = isCarryingMeta(serverName);
+      if (!force && serverNode != null && !serverNode.isInState(ServerState.ONLINE)) {
+        LOG.info("Skip adding ServerCrashProcedure for {} (meta={}) -- running?", serverNode,
+          carryingMeta);
+        return Procedure.NO_PROC_ID;
+      } else {
+        MasterProcedureEnv mpe = procExec.getEnvironment();
+        // If serverNode == null, then 'Unknown Server'. Schedule HBCKSCP instead.
+        // HBCKSCP scours Master in-memory state AND hbase;meta for references to
+        // serverName just-in-case. An SCP that is scheduled when the server is
+        // 'Unknown' probably originated externally with HBCK2 fix-it tool.
+        ServerState oldState = null;
+        if (serverNode != null) {
+          oldState = serverNode.getState();
+          serverNode.setState(ServerState.CRASHED);
+        }
+
+        if (force) {
+          LOG.info("Failure Recovery Submitting HBCKServerCrashProcedure for {} (meta={})", serverName, carryingMeta);
+          pid = procExec.submitProcedure(
+            new HBCKServerCrashProcedure(mpe, serverName, shouldSplitWal, carryingMeta));
+        } else {
+          LOG.info("Failure Recovery Submitting ServerCrashProcedure for {} (meta={})", serverName, carryingMeta);
           pid = procExec.submitProcedure(
             new ServerCrashProcedure(mpe, serverName, shouldSplitWal, carryingMeta));
         }

@@ -117,6 +117,7 @@ class NettyRpcDuplexHandler extends ChannelDuplexHandler {
   @Override
   public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise)
     throws Exception {
+    LOG.info("Failure Recovery, NettyRpcDuplexHandler write");
     if (msg instanceof Call) {
       Call call = (Call) msg;
       try (Scope scope = call.span.makeCurrent()) {
@@ -214,6 +215,7 @@ class NettyRpcDuplexHandler extends ChannelDuplexHandler {
 
   @Override
   public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+    LOG.info("Failure Recovery, NettyRpcDuplexHandler channelRead");
     if (msg instanceof ByteBuf) {
       ByteBuf buf = (ByteBuf) msg;
       try {

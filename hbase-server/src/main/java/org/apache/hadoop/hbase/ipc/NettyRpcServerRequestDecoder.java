@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hbase.ipc;
 
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.yetus.audience.InterfaceAudience;
 
 import org.apache.hbase.thirdparty.io.netty.buffer.ByteBuf;
@@ -56,6 +57,7 @@ class NettyRpcServerRequestDecoder extends ChannelInboundHandlerAdapter {
 
   @Override
   public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+    System.out.println("Failure Recovery, NettyRpcServerRequestDecode is dryrun is: " + TraceUtil.isDryRun());
     ByteBuf input = (ByteBuf) msg;
     // 4 bytes length field
     metrics.receivedBytes(input.readableBytes() + 4);

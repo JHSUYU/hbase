@@ -53,6 +53,8 @@ public class ReplicationQueueInfo {
       // extract dead servers
       extractDeadServersFromZNodeString(parts[1], this.deadRegionServers);
     }
+    LOG.info("Failure Recovery, queueId=" + queueId + ", peerId=" + peerId + ", deadServers="
+      + deadRegionServers);
   }
 
   /**
