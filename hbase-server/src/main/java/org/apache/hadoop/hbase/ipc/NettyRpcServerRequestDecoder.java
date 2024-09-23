@@ -24,6 +24,7 @@ import org.apache.hbase.thirdparty.io.netty.buffer.ByteBuf;
 import org.apache.hbase.thirdparty.io.netty.channel.ChannelHandlerContext;
 import org.apache.hbase.thirdparty.io.netty.channel.ChannelInboundHandlerAdapter;
 import org.apache.hbase.thirdparty.io.netty.channel.group.ChannelGroup;
+import static org.apache.hadoop.hbase.ipc.NettyRpcDryRunTracerHandler.DRY_RUN_BAGGAGE;
 
 /**
  * Decoder for rpc request.
@@ -57,7 +58,12 @@ class NettyRpcServerRequestDecoder extends ChannelInboundHandlerAdapter {
 
   @Override
   public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-    System.out.println("Failure Recovery, NettyRpcServerRequestDecode is dryrun is: " + TraceUtil.isDryRun());
+//    String isDryRun = ctx.channel().attr(DRY_RUN_BAGGAGE).get();
+//    System.out.println("Dry run baggage in decoder: " + isDryRun);
+//    if (isDryRun != null) {
+//      System.out.println("Dry run baggage in decoder: " + isDryRun);
+//      // 使用isDryRun值进行后续处理
+//    }
     ByteBuf input = (ByteBuf) msg;
     // 4 bytes length field
     metrics.receivedBytes(input.readableBytes() + 4);

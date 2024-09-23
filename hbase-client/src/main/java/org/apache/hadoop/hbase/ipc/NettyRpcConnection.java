@@ -165,7 +165,7 @@ class NettyRpcConnection extends RpcConnection {
         new LengthFieldBasedFrameDecoder(Integer.MAX_VALUE, 0, 4))
       .addBefore(BufferCallBeforeInitHandler.NAME, null,
         new NettyRpcDuplexHandler(this, rpcClient.cellBlockBuilder, codec, compressor))
-      .addBefore(BufferCallBeforeInitHandler.NAME, null, new NettyRpcDryRunTracerHandler())
+      //.addBefore(BufferCallBeforeInitHandler.NAME, null, new NettyRpcDryRunTracerHandler())
       .fireUserEventTriggered(BufferCallEvent.success());
   }
 
@@ -289,6 +289,7 @@ class NettyRpcConnection extends RpcConnection {
 
         @Override
         protected void initChannel(Channel ch) throws Exception {
+          //ch.pipeline().addLast("dryRunTracer", new NettyRpcDryRunTracerHandler());
           ch.pipeline().addLast(BufferCallBeforeInitHandler.NAME,
             new BufferCallBeforeInitHandler());
         }

@@ -394,6 +394,7 @@ class ScannerCallableWithReplicas implements RetryingCallable<Result[]> {
               cConnection == null ? null : cConnection.getConnectionMetrics())
             .<Result[]> newCaller();
       }
+      LOG.info("Failure Recovery, connection class name is " + cConnection.getClass().getName());
     }
 
     @Override

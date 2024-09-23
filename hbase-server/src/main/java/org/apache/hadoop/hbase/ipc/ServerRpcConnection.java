@@ -607,8 +607,17 @@ abstract class ServerRpcConnection implements Closeable {
     ProtobufUtil.mergeFrom(builder, cis, headerSize);
     RequestHeader header = (RequestHeader) builder.build();
     offset += headerSize;
+    Boolean isDryRun = Boolean.valueOf(header.getTraceInfo().getHeadersMap().get("is_dry_run"));
     Context traceCtx = GlobalOpenTelemetry.getPropagators().getTextMapPropagator()
       .extract(Context.current(), header.getTraceInfo(), getter);
+//    Boolean isDryRun = traceCtx.get(TraceUtil.IS_DRY_RUN);
+//    System.out.println("isDryRun: " + isDryRun);
+    if(isDryRun){
+      Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
+      dryRunBaggage.makeCurrent();
+      Context.current().with(dryRunBaggage);
+    }
+    System.out.println("ServerRpcConnecton isDryRun: " + isDryRun);
 
     // n.b. Management of this Span instance is a little odd. Most exit paths from this try scope
     // are early-exits due to error cases. There's only one success path, the asynchronous call to
@@ -714,8 +723,9 @@ abstract class ServerRpcConnection implements Closeable {
       ServerCall<?> call = createCall(id, this.service, md, header, param, cellScanner,
         totalRequestSize, this.addr, timeout, this.callCleanup);
 
-
-      if (this.rpcServer.scheduler.dispatch(new CallRunner(this.rpcServer, call))) {
+      CallRunner cr = new CallRunner(this.rpcServer, call);
+      cr.isDryRun = isDryRun;
+      if (this.rpcServer.scheduler.dispatch(cr)) {
         // unset span do that it's not closed in the finally block
         span = null;
       } else {

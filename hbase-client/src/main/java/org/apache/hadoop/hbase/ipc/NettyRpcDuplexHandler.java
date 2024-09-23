@@ -25,6 +25,7 @@ import java.util.Map;
 import org.apache.hadoop.hbase.CellScanner;
 import org.apache.hadoop.hbase.codec.Codec;
 import org.apache.hadoop.hbase.exceptions.ConnectionClosedException;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.io.compress.CompressionCodec;
 import org.apache.hadoop.ipc.RemoteException;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -215,7 +216,7 @@ class NettyRpcDuplexHandler extends ChannelDuplexHandler {
 
   @Override
   public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-    LOG.info("Failure Recovery, NettyRpcDuplexHandler channelRead");
+    LOG.info("Failure Recovery, NettyRpcDuplexHandler channelRead isDryRun is: " + TraceUtil.isDryRun());
     if (msg instanceof ByteBuf) {
       ByteBuf buf = (ByteBuf) msg;
       try {

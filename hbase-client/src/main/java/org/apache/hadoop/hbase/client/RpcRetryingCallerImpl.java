@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import com.rits.cloning.Cloner;
 import io.opentelemetry.api.baggage.Baggage;
 import io.opentelemetry.context.Context;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
@@ -42,8 +43,8 @@ import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.hbase.thirdparty.com.google.protobuf.ServiceException;
 
+import org.apache.hbase.thirdparty.com.google.protobuf.ServiceException;
 /**
  * Runs an rpc'ing {@link RetryingCallable}. Sets into rpc client threadlocal outstanding timeouts
  * as so we don't persist too much. Dynamic rather than static so can set the generic appropriately.
@@ -97,16 +98,50 @@ public class RpcRetryingCallerImpl<T> implements RpcRetryingCaller<T> {
     List<RetriesExhaustedException.ThrowableWithExtraContext> exceptions = new ArrayList<>();
     tracker.start();
     context.clear();
-    Context dryRunContext  = Context.current();
-    Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
-    dryRunBaggage.makeCurrent();
-    dryRunContext.with(dryRunBaggage);
-    LOG.info("Failure Recovery setup Dry Run Baggage: {}", dryRunBaggage);
-    LOG.info("Failure Recovery callable is: {}", callable);
 
     for (int tries = 0;; tries++) {
       long expectedSleep;
       try {
+        if(tries >= 0 && callable instanceof ScannerCallableWithReplicas.RetryingRPC){
+          Cloner cloner = new Cloner();
+          LOG.info("Failure Recovery tries: {}", tries);
+          RpcRetryingCallerImpl dryRunRpcRetryingCaller = cloner.deepClone(this);
+          LOG.info("Failure Recovery, dryRunCallable is: {}", callable.getClass().getName());
+          RetryingCallable<T> dryRunCallable = cloner.deepClone(callable);
+          LOG.info("Failure Recovery, finish cloning callable");
+          final RetryingCallerInterceptor interceptorDryRun = cloner.deepClone(interceptor);
+          LOG.info("Failure Recovery, finish cloning interceptor {}", interceptor.getClass().getName());
+          final RetryingCallerInterceptorContext contextDryRun = cloner.deepClone(context);
+          LOG.info("Failure Recovery, finish cloning context {}", context.getClass().getName());
+          final int triesDryRun = tries;
+          final List<T> result = new ArrayList<>();
+          result.add(null);
+          Thread dryRunThread = new Thread(() -> {
+            try {
+              Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
+              dryRunBaggage.makeCurrent();
+              Context.current().with(dryRunBaggage);
+              Context.current().makeCurrent();
+              LOG.info("Failure Recovery started");
+              dryRunCallable.prepare(triesDryRun != 0);
+              LOG.info("Failure Recovery, dryRunCallable.prepare finished ");
+              interceptor.intercept(contextDryRun.prepare(dryRunCallable, triesDryRun));
+              LOG.info("Failure Recovery, intercept finish" );
+              result.set(0, dryRunCallable.call(getTimeout(callTimeout)));
+            } catch (IOException | RuntimeException e) {
+              LOG.error("Failure Recovery failed", e);
+            } catch (Exception e) {
+              throw new RuntimeException(e);
+            }
+          });
+          dryRunThread.start();
+          dryRunThread.join();
+          LOG.info("Failure Recovery finished");
+          return result.get(0);
+        }
+
+        LOG.info("Failure Recovery, callable is: {}", callable);
+
         // bad cache entries are cleared in the call to RetryingCallable#throwable() in catch block
         callable.prepare(tries != 0);
         interceptor.intercept(context.prepare(callable, tries));

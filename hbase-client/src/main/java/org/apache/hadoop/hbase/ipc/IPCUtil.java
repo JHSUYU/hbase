@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.ipc;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.baggage.Baggage;
+import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.context.Context;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -27,6 +28,7 @@ import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.nio.channels.ClosedChannelException;
 import java.util.concurrent.TimeoutException;
+import io.opentelemetry.context.ContextKey;
 import io.opentelemetry.context.Scope;
 import org.apache.commons.lang3.mutable.MutableInt;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
@@ -122,18 +124,23 @@ class IPCUtil {
     RequestHeader.Builder builder = RequestHeader.newBuilder();
     builder.setCallId(call.id);
     RPCTInfo.Builder traceBuilder = RPCTInfo.newBuilder();
-//    Context.current().with(Baggage.current());
-//    LOG.info("Client: Created Baggage: " + Baggage.current());
-//    LOG.info("Client: Created Context: " + Context.current());
-//    GlobalOpenTelemetry.getPropagators().getTextMapPropagator().inject(
-//      Context.current(),
-//      traceBuilder,
-//      (carrier, key, value) -> {
-//        carrier.putHeaders(key, value);
-//        LOG.info("Client: Injecting key: " + key + ", value: " + value);
-//      }
-//    );
-    builder.setTraceInfo(traceBuilder.build());
+    boolean isDryRun = TraceUtil.isDryRun();
+    Context currentContext = Context.current();
+    Context dryRunContext = currentContext.with(TraceUtil.IS_DRY_RUN, isDryRun);
+    GlobalOpenTelemetry.getPropagators().getTextMapPropagator().inject(
+      dryRunContext,
+      traceBuilder,
+      (carrier, key, value) -> {
+        carrier.putHeaders(key, value);
+        LOG.info("Client: Injecting key: " + key + ", value: " + value);
+      }
+    );
+    traceBuilder.putHeaders("is_dry_run", Boolean.toString(isDryRun));
+    RPCTInfo traceInfo = traceBuilder.build();
+    LOG.info("traceInfo: " + traceInfo);
+    //print traceInfo HeadersMap
+    LOG.info("traceInfo HeadersMap: " + traceInfo.getHeadersMap());
+    builder.setTraceInfo(traceInfo);
     builder.setMethodName(call.md.getName());
     builder.setRequestParam(call.param != null);
     if (cellBlockMeta != null) {

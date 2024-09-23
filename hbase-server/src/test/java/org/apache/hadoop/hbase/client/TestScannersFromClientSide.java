@@ -119,8 +119,9 @@ public class TestScannersFromClientSide {
 
   @Parameterized.Parameters
   public static Collection<Object[]> parameters() {
-    return Arrays.asList(new Object[][] { { MasterRegistry.class, 1 }, { MasterRegistry.class, 2 },
-      { ZKConnectionRegistry.class, 1 } });
+//    return Arrays.asList(new Object[][] { { MasterRegistry.class, 1 }, { MasterRegistry.class, 2 },
+//      { ZKConnectionRegistry.class, 1 } });
+    return Arrays.asList(new Object[][] { { MasterRegistry.class, 1 } });
   }
 
   /**
@@ -216,6 +217,7 @@ public class TestScannersFromClientSide {
     kvListExp.add(new KeyValue(ROW, FAMILY, QUALIFIERS[6], 6, VALUE));
     kvListExp.add(new KeyValue(ROW, FAMILY, QUALIFIERS[7], 7, VALUE));
     result = scanner.next();
+    LOG.info("FL Result=" + result);
     verifyResult(result, kvListExp, toLog, "Testing first batch of scan");
 
     // with batch

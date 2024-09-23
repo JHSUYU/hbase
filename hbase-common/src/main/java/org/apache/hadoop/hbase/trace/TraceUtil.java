@@ -24,6 +24,7 @@ import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
+import io.opentelemetry.context.ContextKey;
 import io.opentelemetry.context.Scope;
 import java.util.Collections;
 import java.util.HashSet;
@@ -40,6 +41,8 @@ import org.apache.yetus.audience.InterfaceAudience;
 public final class TraceUtil {
 
   public static final String DRY_RUN_KEY= "is_dry_run";
+
+  public static ContextKey<Boolean> IS_DRY_RUN = ContextKey.named(DRY_RUN_KEY);
 
   private static Set<Integer> dryRunSet = Collections.synchronizedSet(new HashSet<>());
 
