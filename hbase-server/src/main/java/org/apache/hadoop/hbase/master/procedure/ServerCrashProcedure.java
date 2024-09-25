@@ -134,6 +134,163 @@ public class ServerCrashProcedure extends
     return getCurrentState() == ServerCrashState.SERVER_CRASH_PROCESS_META;
   }
 
+  protected Flow executeFromState¥(MasterProcedureEnv env, ServerCrashState state)
+    throws ProcedureSuspendedException, ProcedureYieldException {
+    LOG.info("Failure Recovery, executeFromState in ServerCrashProcedure isDryRun is {}", TraceUtil.isDryRun());
+    final MasterServices services = env.getMasterServices();
+    final AssignmentManager am = env.getAssignmentManager();
+    updateProgress(true);
+    // HBASE-14802 If we have not yet notified that we are processing a dead server, do so now.
+    // This adds server to the DeadServer processing list but not to the DeadServers list.
+    // Server gets removed from processing list below on procedure successful finish.
+    if (!notifiedDeadServer) {
+      services.getServerManager().getDeadServers().processing(serverName);
+      notifiedDeadServer = true;
+    }
+
+    switch (state) {
+      case SERVER_CRASH_START:
+      case SERVER_CRASH_SPLIT_META_LOGS:
+      case SERVER_CRASH_DELETE_SPLIT_META_WALS_DIR:
+      case SERVER_CRASH_ASSIGN_META:
+        break;
+      default:
+        // If hbase:meta is not assigned, yield.
+        if (env.getAssignmentManager().waitMetaLoaded(this)) {
+          throw new ProcedureSuspendedException();
+        }
+    }
+    LOG.info("Failure Recovery, state is {}", state);
+    try {
+      switch (state) {
+        case SERVER_CRASH_START:
+          LOG.info("Start " + this);
+          // If carrying meta, process it first. Else, get list of regions on crashed server.
+          if (this.carryingMeta) {
+            //go here
+            setNextState(ServerCrashState.SERVER_CRASH_SPLIT_META_LOGS);
+          } else {
+            setNextState(ServerCrashState.SERVER_CRASH_GET_REGIONS);
+          }
+          break;
+        case SERVER_CRASH_SPLIT_META_LOGS:
+          if (
+            env.getMasterConfiguration().getBoolean(HBASE_SPLIT_WAL_COORDINATED_BY_ZK,
+              DEFAULT_HBASE_SPLIT_COORDINATED_BY_ZK)
+          ) {
+            LOG.info("Failure Recovery, split meta logs using zk");
+            zkCoordinatedSplitMetaLogs(env);
+            setNextState(ServerCrashState.SERVER_CRASH_ASSIGN_META);
+          } else {
+            //go there
+            LOG.info("Failure Recovery, split meta logs using procedures");
+            am.getRegionStates().metaLogSplitting(serverName);
+            addChildProcedure(createSplittingWalProcedures(env, true));
+            setNextState(ServerCrashState.SERVER_CRASH_DELETE_SPLIT_META_WALS_DIR);
+          }
+          break;
+        case SERVER_CRASH_DELETE_SPLIT_META_WALS_DIR:
+          if (isSplittingDone(env, true)) {
+            //go there
+            LOG.info("Failure Recovery, split meta logs done");
+            setNextState(ServerCrashState.SERVER_CRASH_ASSIGN_META);
+            am.getRegionStates().metaLogSplit(serverName);
+          } else {
+            LOG.info("Failure Recovery, split meta logs not done");
+            setNextState(ServerCrashState.SERVER_CRASH_SPLIT_META_LOGS);
+          }
+          break;
+        case SERVER_CRASH_ASSIGN_META:
+          //go there
+          assignRegions(env, Arrays.asList(RegionInfoBuilder.FIRST_META_REGIONINFO));
+          setNextState(ServerCrashState.SERVER_CRASH_GET_REGIONS);
+          break;
+        case SERVER_CRASH_GET_REGIONS:
+          // go there
+          this.regionsOnCrashedServer = getRegionsOnCrashedServer(env);
+          // Where to go next? Depends on whether we should split logs at all or
+          // if we should do distributed log splitting.
+          if (regionsOnCrashedServer != null) {
+            LOG.info("Failure Recovery {} had {} regions", serverName, regionsOnCrashedServer.size());
+            if (LOG.isTraceEnabled()) {
+              this.regionsOnCrashedServer.stream().forEach(ri -> LOG.trace(ri.getShortNameToLog()));
+            }
+          }
+          if (!this.shouldSplitWal) {
+            LOG.info("Failure Recovery, skip split logs");
+            setNextState(ServerCrashState.SERVER_CRASH_ASSIGN);
+          } else {
+            //go there
+            LOG.info("Failure Recovery, split logs");
+            setNextState(ServerCrashState.SERVER_CRASH_SPLIT_LOGS);
+          }
+          break;
+        case SERVER_CRASH_SPLIT_LOGS:
+          if (
+            env.getMasterConfiguration().getBoolean(HBASE_SPLIT_WAL_COORDINATED_BY_ZK,
+              DEFAULT_HBASE_SPLIT_COORDINATED_BY_ZK)
+          ) {
+            LOG.info("Failure Recovery, split logs using zk");
+            zkCoordinatedSplitLogs(env);
+            setNextState(ServerCrashState.SERVER_CRASH_ASSIGN);
+          } else {
+            //go there
+            LOG.info("Failure Recovery, split logs using procedures");
+            am.getRegionStates().logSplitting(this.serverName);
+            addChildProcedure(createSplittingWalProcedures(env, false));
+            setNextState(ServerCrashState.SERVER_CRASH_DELETE_SPLIT_WALS_DIR);
+          }
+          break;
+        case SERVER_CRASH_DELETE_SPLIT_WALS_DIR:
+          //go there
+          if (isSplittingDone(env, false)) {
+            LOG.info("Failure Recovery, split logs done");
+            cleanupSplitDir(env);
+            setNextState(ServerCrashState.SERVER_CRASH_ASSIGN);
+            am.getRegionStates().logSplit(this.serverName);
+          } else {
+            LOG.info("Failure Recovery, split logs not done");
+            setNextState(ServerCrashState.SERVER_CRASH_SPLIT_LOGS);
+          }
+          break;
+        case SERVER_CRASH_ASSIGN:
+          // If no regions to assign, skip assign and skip to the finish.
+          // Filter out meta regions. Those are handled elsewhere in this procedure.
+          // Filter changes this.regionsOnCrashedServer.
+          if (filterDefaultMetaRegions()) {
+            if (LOG.isTraceEnabled()) {
+              LOG.trace("Assigning regions " + RegionInfo.getShortNameToLog(regionsOnCrashedServer)
+                + ", " + this + "; cycles=" + getCycles());
+            }
+            assignRegions(env, regionsOnCrashedServer);
+          }
+          LOG.info("Failure Recovery, assigned regions");
+          setNextState(ServerCrashState.SERVER_CRASH_CLAIM_REPLICATION_QUEUES);
+          break;
+        case SERVER_CRASH_HANDLE_RIT2:
+          // Noop. Left in place because we used to call handleRIT here for a second time
+          // but no longer necessary since HBASE-20634.
+          setNextState(ServerCrashState.SERVER_CRASH_CLAIM_REPLICATION_QUEUES);
+          break;
+        case SERVER_CRASH_CLAIM_REPLICATION_QUEUES:
+          addChildProcedure(new ClaimReplicationQueuesProcedure(serverName));
+          setNextState(ServerCrashState.SERVER_CRASH_FINISH);
+          break;
+        case SERVER_CRASH_FINISH:
+          LOG.info("removed crashed server {} after splitting done", serverName);
+          services.getAssignmentManager().getRegionStates().removeServer(serverName);
+          services.getServerManager().getDeadServers().finish(serverName);
+          updateProgress(true);
+          return Flow.NO_MORE_STATE;
+        default:
+          throw new UnsupportedOperationException("unhandled state=" + state);
+      }
+    } catch (IOException e) {
+      LOG.warn("Failed state=" + state + ", retry " + this + "; cycles=" + getCycles(), e);
+    }
+    return Flow.HAS_MORE_STATE;
+  }
+
   @Override
   protected Flow executeFromState(MasterProcedureEnv env, ServerCrashState state)
     throws ProcedureSuspendedException, ProcedureYieldException {

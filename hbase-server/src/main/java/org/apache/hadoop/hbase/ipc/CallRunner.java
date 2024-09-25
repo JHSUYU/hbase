@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hbase.ipc;
 
+import com.rits.cloning.Cloner;
 import io.opentelemetry.api.baggage.Baggage;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
@@ -127,6 +128,7 @@ public class CallRunner {
         }
         // make the call
         resultPair = this.rpcServer.call(call, this.status);
+        System.out.println("call method name is: " + call.getMethod().getName());
       } catch (TimeoutIOException e) {
         RpcServer.LOG.warn("Can not complete this request in time, drop it: {}", call);
         TraceUtil.setError(ipcServerSpan, e);
@@ -162,7 +164,9 @@ public class CallRunner {
       // Set the response
       Message param = resultPair != null ? resultPair.getFirst() : null;
       CellScanner cells = resultPair != null ? resultPair.getSecond() : null;
-
+      if(cells != null){
+        System.out.println("Cell classname is: " + cells.getClass().getName());
+      }
       call.setResponse(param, cells, errorThrowable, error);
       call.sendResponseIfReady();
       // don't touch `span` here because its status and `end()` are managed in `call#setResponse()`
@@ -209,7 +213,9 @@ public class CallRunner {
       Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
       dryRunBaggage.makeCurrent();
       Context.current().with(dryRunBaggage);
-      run$instrumentation();
+      Cloner cloner = new Cloner();
+      CallRunner callRunner$dryrun = cloner.deepClone(this);
+      callRunner$dryrun.run$instrumentation();
       return;
     }
     try (Scope ignored = span.makeCurrent()) {

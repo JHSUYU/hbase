@@ -45,6 +45,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
+import com.rits.cloning.Cloner;
 import org.apache.commons.lang3.mutable.MutableObject;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -157,6 +158,7 @@ import org.apache.hadoop.hbase.wal.WALSplitUtil.MutationReplay;
 import org.apache.hadoop.hbase.zookeeper.ZKWatcher;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.apache.zookeeper.KeeperException;
+import org.checkerframework.checker.units.qual.C;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -3530,10 +3532,267 @@ public class RSRpcServices
    * @param controller the RPC controller
    * @param request    the scan request
    */
+
+  public ScanResponse scan$instrumentation(final RpcController controller, final ScanRequest request)
+    throws ServiceException {
+    if (controller != null && !(controller instanceof HBaseRpcController)) {
+      throw new UnsupportedOperationException(
+        "We only do " + "HBaseRpcControllers! FIX IF A PROBLEM: " + controller);
+    }
+    if (!request.hasScannerId() && !request.hasScan()) {
+      throw new ServiceException(
+        new DoNotRetryIOException("Missing required input: scannerId or scan"));
+    }
+    try {
+      checkOpen();
+    } catch (IOException e) {
+      if (request.hasScannerId()) {
+        String scannerName = toScannerName(request.getScannerId());
+        if (LOG.isDebugEnabled()) {
+          LOG.debug(
+            "Server shutting down and client tried to access missing scanner " + scannerName);
+        }
+        final LeaseManager leaseManager = regionServer.getLeaseManager();
+        if (leaseManager != null) {
+          try {
+            leaseManager.cancelLease(scannerName);
+          } catch (LeaseException le) {
+            // No problem, ignore
+            if (LOG.isTraceEnabled()) {
+              LOG.trace("Un-able to cancel lease of scanner. It could already be closed.");
+            }
+          }
+        }
+      }
+      throw new ServiceException(e);
+    }
+    requestCount.increment();
+    rpcScanRequestCount.increment();
+    RegionScannerHolder rsh;
+    ScanResponse.Builder builder = ScanResponse.newBuilder();
+    String scannerName;
+    try {
+      if (request.hasScannerId()) {
+        // The downstream projects such as AsyncHBase in OpenTSDB need this value. See HBASE-18000
+        // for more details.
+        long scannerId = request.getScannerId();
+        builder.setScannerId(scannerId);
+        scannerName = toScannerName(scannerId);
+        rsh = getRegionScanner(request);
+      } else {
+        Pair<String, RegionScannerHolder> scannerNameAndRSH = newRegionScanner(request, builder);
+        scannerName = scannerNameAndRSH.getFirst();
+        rsh = scannerNameAndRSH.getSecond();
+      }
+    } catch (IOException e) {
+      if (e == SCANNER_ALREADY_CLOSED) {
+        // Now we will close scanner automatically if there are no more results for this region but
+        // the old client will still send a close request to us. Just ignore it and return.
+        return builder.build();
+      }
+      throw new ServiceException(e);
+    }
+    if (rsh.fullRegionScan) {
+      rpcFullScanRequestCount.increment();
+    }
+    HRegion region = rsh.r;
+    LeaseManager.Lease lease;
+    try {
+      // Remove lease while its being processed in server; protects against case
+      // where processing of request takes > lease expiration time. or null if none found.
+      lease = regionServer.getLeaseManager().removeLease(scannerName);
+    } catch (LeaseException e) {
+      throw new ServiceException(e);
+    }
+    if (request.hasRenew() && request.getRenew()) {
+      // add back and return
+      addScannerLeaseBack(lease);
+      try {
+        checkScanNextCallSeq(request, rsh);
+      } catch (OutOfOrderScannerNextException e) {
+        throw new ServiceException(e);
+      }
+      return builder.build();
+    }
+    OperationQuota quota;
+    try {
+      quota = getRpcQuotaManager().checkQuota(region, OperationQuota.OperationType.SCAN);
+    } catch (IOException e) {
+      addScannerLeaseBack(lease);
+      throw new ServiceException(e);
+    }
+    try {
+      checkScanNextCallSeq(request, rsh);
+    } catch (OutOfOrderScannerNextException e) {
+      addScannerLeaseBack(lease);
+      throw new ServiceException(e);
+    }
+    // Now we have increased the next call sequence. If we give client an error, the retry will
+    // never success. So we'd better close the scanner and return a DoNotRetryIOException to client
+    // and then client will try to open a new scanner.
+    boolean closeScanner = request.hasCloseScanner() ? request.getCloseScanner() : false;
+    int rows; // this is scan.getCaching
+    if (request.hasNumberOfRows()) {
+      rows = request.getNumberOfRows();
+    } else {
+      rows = closeScanner ? 0 : 1;
+    }
+    RpcCall rpcCall = RpcServer.getCurrentCall().orElse(null);
+    // now let's do the real scan.
+    long maxQuotaResultSize = Math.min(maxScannerResultSize, quota.getReadAvailable());
+    RegionScanner scanner = rsh.s;
+    // this is the limit of rows for this scan, if we the number of rows reach this value, we will
+    // close the scanner.
+    int limitOfRows;
+    if (request.hasLimitOfRows()) {
+      limitOfRows = request.getLimitOfRows();
+    } else {
+      limitOfRows = -1;
+    }
+    MutableObject<Object> lastBlock = new MutableObject<>();
+    boolean scannerClosed = false;
+    try {
+      List<Result> results = new ArrayList<>(Math.min(rows, 512));
+      if (rows > 0) {
+        boolean done = false;
+        // Call coprocessor. Get region info from scanner.
+        if (region.getCoprocessorHost() != null) {
+          Boolean bypass = region.getCoprocessorHost().preScannerNext(scanner, results, rows);
+          if (!results.isEmpty()) {
+            for (Result r : results) {
+              lastBlock.setValue(addSize(rpcCall, r, lastBlock.getValue()));
+            }
+          }
+          if (bypass != null && bypass.booleanValue()) {
+            done = true;
+          }
+        }
+        if (!done) {
+          scan((HBaseRpcController) controller, request, rsh, maxQuotaResultSize, rows, limitOfRows,
+            results, builder, lastBlock, rpcCall);
+        } else {
+          builder.setMoreResultsInRegion(!results.isEmpty());
+        }
+      } else {
+        // This is a open scanner call with numberOfRow = 0, so set more results in region to true.
+        builder.setMoreResultsInRegion(true);
+      }
+
+      quota.addScanResult(results);
+      addResults(builder, results, (HBaseRpcController) controller,
+        RegionReplicaUtil.isDefaultReplica(region.getRegionInfo()),
+        isClientCellBlockSupport(rpcCall));
+      if (scanner.isFilterDone() && results.isEmpty()) {
+        // If the scanner's filter - if any - is done with the scan
+        // only set moreResults to false if the results is empty. This is used to keep compatible
+        // with the old scan implementation where we just ignore the returned results if moreResults
+        // is false. Can remove the isEmpty check after we get rid of the old implementation.
+        builder.setMoreResults(false);
+      }
+      // Later we may close the scanner depending on this flag so here we need to make sure that we
+      // have already set this flag.
+      assert builder.hasMoreResultsInRegion();
+      // we only set moreResults to false in the above code, so set it to true if we haven't set it
+      // yet.
+      if (!builder.hasMoreResults()) {
+        builder.setMoreResults(true);
+      }
+      if (builder.getMoreResults() && builder.getMoreResultsInRegion() && !results.isEmpty()) {
+        // Record the last cell of the last result if it is a partial result
+        // We need this to calculate the complete rows we have returned to client as the
+        // mayHaveMoreCellsInRow is true does not mean that there will be extra cells for the
+        // current row. We may filter out all the remaining cells for the current row and just
+        // return the cells of the nextRow when calling RegionScanner.nextRaw. So here we need to
+        // check for row change.
+        Result lastResult = results.get(results.size() - 1);
+        if (lastResult.mayHaveMoreCellsInRow()) {
+          rsh.rowOfLastPartialResult = lastResult.getRow();
+        } else {
+          rsh.rowOfLastPartialResult = null;
+        }
+      }
+      if (!builder.getMoreResults() || !builder.getMoreResultsInRegion() || closeScanner) {
+        scannerClosed = true;
+        closeScanner(region, scanner, scannerName, rpcCall, false);
+      }
+
+      // There's no point returning to a timed out client. Throwing ensures scanner is closed
+      if (rpcCall != null && EnvironmentEdgeManager.currentTime() > rpcCall.getDeadline()) {
+        throw new TimeoutIOException("Client deadline exceeded, cannot return results");
+      }
+
+      return builder.build();
+    } catch (IOException e) {
+      try {
+        // scanner is closed here
+        scannerClosed = true;
+        // The scanner state might be left in a dirty state, so we will tell the Client to
+        // fail this RPC and close the scanner while opening up another one from the start of
+        // row that the client has last seen.
+        closeScanner(region, scanner, scannerName, rpcCall, true);
+
+        // If it is a DoNotRetryIOException already, throw as it is. Unfortunately, DNRIOE is
+        // used in two different semantics.
+        // (1) The first is to close the client scanner and bubble up the exception all the way
+        // to the application. This is preferred when the exception is really un-recoverable
+        // (like CorruptHFileException, etc). Plain DoNotRetryIOException also falls into this
+        // bucket usually.
+        // (2) Second semantics is to close the current region scanner only, but continue the
+        // client scanner by overriding the exception. This is usually UnknownScannerException,
+        // OutOfOrderScannerNextException, etc where the region scanner has to be closed, but the
+        // application-level ClientScanner has to continue without bubbling up the exception to
+        // the client. See ClientScanner code to see how it deals with these special exceptions.
+        if (e instanceof DoNotRetryIOException) {
+          throw e;
+        }
+
+        // If it is a FileNotFoundException, wrap as a
+        // DoNotRetryIOException. This can avoid the retry in ClientScanner.
+        if (e instanceof FileNotFoundException) {
+          throw new DoNotRetryIOException(e);
+        }
+
+        // We closed the scanner already. Instead of throwing the IOException, and client
+        // retrying with the same scannerId only to get USE on the next RPC, we directly throw
+        // a special exception to save an RPC.
+        if (VersionInfoUtil.hasMinimumVersion(rpcCall.getClientVersionInfo(), 1, 4)) {
+          // 1.4.0+ clients know how to handle
+          throw new ScannerResetException("Scanner is closed on the server-side", e);
+        } else {
+          // older clients do not know about SRE. Just throw USE, which they will handle
+          throw new UnknownScannerException("Throwing UnknownScannerException to reset the client"
+            + " scanner state for clients older than 1.3.", e);
+        }
+      } catch (IOException ioe) {
+        throw new ServiceException(ioe);
+      }
+    } finally {
+      if (!scannerClosed) {
+        // Adding resets expiration time on lease.
+        // the closeCallBack will be set in closeScanner so here we only care about shippedCallback
+        if (rpcCall != null) {
+          rpcCall.setCallBack(rsh.shippedCallback);
+        } else {
+          // If context is null,here we call rsh.shippedCallback directly to reuse the logic in
+          // rsh.shippedCallback to release the internal resources in rsh,and lease is also added
+          // back to regionserver's LeaseManager in rsh.shippedCallback.
+          runShippedCallback(rsh);
+        }
+      }
+      quota.close();
+    }
+  }
+
   @Override
   public ScanResponse scan(final RpcController controller, final ScanRequest request)
     throws ServiceException {
     LOG.info("Failure Recovery, RSRpcServices.scan isDryRun is "+ TraceUtil.isDryRun());
+//    if(TraceUtil.isDryRun()){
+//      Cloner cloner = new Cloner();
+//      ScanRequest request$dryRun = cloner.deepClone(request);
+//      RSRpcServices rsRpcServices$dryrun = cloner.deepClone(this);
+//      return rsRpcServices$dryrun.scan$instrumentation(controller, request$dryRun);
+//    }
     if (controller != null && !(controller instanceof HBaseRpcController)) {
       throw new UnsupportedOperationException(
         "We only do " + "HBaseRpcControllers! FIX IF A PROBLEM: " + controller);

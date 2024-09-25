@@ -318,10 +318,10 @@ public abstract class RemoteProcedureDispatcher<TEnv, TRemote extends Comparable
 
     @Override
     public void run() {
-      Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
-      dryRunBaggage.makeCurrent();
-      Context context = Context.current();
-      context.with(dryRunBaggage);
+//      Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
+//      dryRunBaggage.makeCurrent();
+//      Context context = Context.current();
+//      context.with(dryRunBaggage);
       LOG.info("Failure Recovery, isDryRun in TimeoutExecutorThread is " + TraceUtil.isDryRun());
       while (running.get()) {
         final DelayedWithTimeout task =

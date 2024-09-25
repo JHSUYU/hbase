@@ -184,6 +184,9 @@ class CellBlockBuilder {
       }
       Codec.Encoder encoder = codec.getEncoder(os);
       while (cellScanner.advance()) {
+        LOG.info("cellScanner class is");
+        LOG.info("encoder class: " + encoder.getClass().getName());
+        LOG.info("cellScanner class: " + cellScanner.current().getClass().getName());
         encoder.write(cellScanner.current());
       }
       encoder.flush();

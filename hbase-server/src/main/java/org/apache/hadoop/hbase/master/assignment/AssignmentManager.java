@@ -1957,8 +1957,9 @@ public class AssignmentManager {
             new HBCKServerCrashProcedure(mpe, serverName, shouldSplitWal, carryingMeta));
         } else {
           LOG.info("Failure Recovery Submitting ServerCrashProcedure for {} (meta={})", serverName, carryingMeta);
-          pid = procExec.submitProcedure(
-            new ServerCrashProcedure(mpe, serverName, shouldSplitWal, carryingMeta));
+          ServerCrashProcedure scp = new ServerCrashProcedure(mpe, serverName, shouldSplitWal, carryingMeta);
+          scp.isDryRun = isDryRun;
+          pid = procExec.submitProcedure(scp);
         }
         LOG.info("Scheduled ServerCrashProcedure pid={} for {} (carryingMeta={}){}.", pid,
           serverName, carryingMeta,

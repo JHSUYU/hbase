@@ -53,7 +53,12 @@ public class SplitWALProcedure
   private ServerName crashedServer;
   private RetryCounter retryCounter;
 
-  public SplitWALProcedure() {
+
+  public SplitWALProcedure(String walPath, ServerName crashedServer, boolean isDryRun) {
+    LOG.info("Failure Recovery, SplitWALProcedure constructor isDryRun is {}", TraceUtil.isDryRun());
+    this.walPath = walPath;
+    this.crashedServer = crashedServer;
+    this.isDryRun = isDryRun;
   }
 
   public SplitWALProcedure(String walPath, ServerName crashedServer) {

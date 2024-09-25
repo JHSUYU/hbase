@@ -42,6 +42,7 @@ import org.apache.hadoop.hbase.master.procedure.SplitWALProcedure;
 import org.apache.hadoop.hbase.procedure2.Procedure;
 import org.apache.hadoop.hbase.procedure2.ProcedureEvent;
 import org.apache.hadoop.hbase.procedure2.ProcedureSuspendedException;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.wal.AbstractFSWALProvider;
 import org.apache.hadoop.hbase.wal.WALSplitUtil;
@@ -141,7 +142,7 @@ public class SplitWALManager {
   List<Procedure> createSplitWALProcedures(List<FileStatus> splittingWALs,
     ServerName crashedServer) {
     return splittingWALs.stream()
-      .map(wal -> new SplitWALProcedure(wal.getPath().toString(), crashedServer))
+      .map(wal -> new SplitWALProcedure(wal.getPath().toString(), crashedServer, TraceUtil.isDryRun()))
       .collect(Collectors.toList());
   }
 

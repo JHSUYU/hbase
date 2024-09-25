@@ -137,9 +137,9 @@ class IPCUtil {
     );
     traceBuilder.putHeaders("is_dry_run", Boolean.toString(isDryRun));
     RPCTInfo traceInfo = traceBuilder.build();
-    LOG.info("traceInfo: " + traceInfo);
+    //LOG.info("traceInfo: " + traceInfo);
     //print traceInfo HeadersMap
-    LOG.info("traceInfo HeadersMap: " + traceInfo.getHeadersMap());
+    //LOG.info("traceInfo HeadersMap: " + traceInfo.getHeadersMap());
     builder.setTraceInfo(traceInfo);
     builder.setMethodName(call.md.getName());
     builder.setRequestParam(call.param != null);
