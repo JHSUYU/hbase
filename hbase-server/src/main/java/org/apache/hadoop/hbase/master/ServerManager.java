@@ -45,12 +45,14 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.YouAreDeadException;
 import org.apache.hadoop.hbase.client.ClusterConnection;
 import org.apache.hadoop.hbase.client.RegionInfo;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.ipc.HBaseRpcController;
 import org.apache.hadoop.hbase.ipc.RemoteWithExtrasException;
 import org.apache.hadoop.hbase.ipc.RpcControllerFactory;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.procedure2.Procedure;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
@@ -124,14 +126,20 @@ public class ServerManager {
   private final ConcurrentNavigableMap<ServerName, ServerMetrics> onlineServers =
     new ConcurrentSkipListMap<>();
 
+  public ConcurrentNavigableMap<ServerName, ServerMetrics> onlineServers$dryrun =
+    null;
+
   /** List of region servers that should not get any more new regions. */
   private final ArrayList<ServerName> drainingServers = new ArrayList<>();
 
   private final MasterServices master;
+  public MasterServices master$dryrun = null;
   private final ClusterConnection connection;
   private final RegionServerList storage;
 
   private final DeadServer deadservers = new DeadServer();
+
+  public DeadServer deadservers$dryrun = null;
 
   private final long maxSkew;
   private final long warningSkew;
@@ -536,12 +544,15 @@ public class ServerManager {
    */
   // Redo test so we can make this protected.
   public synchronized long expireServer(final ServerName serverName) {
+    if(TraceUtil.isDryRun()){
+      return expireServer$instrumentation(serverName,false);
+    }
     return expireServer(serverName, false);
 
   }
 
   public synchronized long expireServer$instrumentation(final ServerName serverName) {
-    return expireServer$instrumentation(serverName, false);
+    return expireServer(serverName, false);
   }
 
   synchronized long expireServer$instrumentation(final ServerName serverName, boolean force) {
@@ -586,7 +597,8 @@ public class ServerManager {
 
     boolean isDryRun = Boolean.parseBoolean(Baggage.current().getEntryValue("dry-run"));
     LOG.info("Failure Recovery, isDryRun in ServerManager is " + isDryRun);
-    long pid = master.getAssignmentManager().submitServerCrash$instrumentation(serverName, true, force);
+    this.master$dryrun = DryRunManager.get(this.master, this.master$dryrun);
+    long pid = master$dryrun.getAssignmentManager().submitServerCrash(serverName, true, force);
     storage.expired(serverName);
     // Tell our listeners that a server was removed
     if (!this.listeners.isEmpty()) {
@@ -597,6 +609,9 @@ public class ServerManager {
 
   synchronized long expireServer(final ServerName serverName, boolean force) {
     // THIS server is going down... can't handle our own expiration.
+    if(TraceUtil.isDryRun()){
+      return expireServer$instrumentation(serverName,force);
+    }
     if (serverName.equals(master.getServerName())) {
       if (!(master.isAborted() || master.isStopped())) {
         master.stop("We lost our znode?");
@@ -633,7 +648,7 @@ public class ServerManager {
       return Procedure.NO_PROC_ID;
     }
     LOG.info("Processing expiration of " + serverName + " on " + this.master.getServerName());
-    long pid = master.getAssignmentManager().submitServerCrash(serverName, true, force);
+    long pid = DryRunManager.get(this, master).getAssignmentManager().submitServerCrash(serverName, true, force);
     storage.expired(serverName);
     // Tell our listeners that a server was removed
     if (!this.listeners.isEmpty()) {
@@ -647,6 +662,10 @@ public class ServerManager {
    */
   // Locking in this class needs cleanup.
   public synchronized void moveFromOnlineToDeadServers(final ServerName sn) {
+    if(TraceUtil.isDryRun()){
+      moveFromOnlineToDeadServers$instrumentation(sn);
+      return;
+    }
     synchronized (this.onlineServers) {
       boolean online = this.onlineServers.containsKey(sn);
       if (online) {
@@ -655,7 +674,31 @@ public class ServerManager {
         // not in online servers list.
         this.deadservers.putIfAbsent(sn);
         this.onlineServers.remove(sn);
-        onlineServers.notifyAll();
+        this.onlineServers.notifyAll();
+      } else {
+        // If not online, that is odd but may happen if 'Unknown Servers' -- where meta
+        // has references to servers not online nor in dead servers list. If
+        // 'Unknown Server', don't add to DeadServers else will be there for ever.
+        LOG.trace("Expiration of {} but server not online", sn);
+      }
+    }
+  }
+
+  public synchronized void moveFromOnlineToDeadServers$instrumentation(final ServerName sn) {
+    this.onlineServers$dryrun = DryRunManager.shallowCopy(this.onlineServers, this.onlineServers$dryrun);
+    synchronized (this.onlineServers$dryrun) {
+      this.onlineServers$dryrun = DryRunManager.shallowCopy(this.onlineServers, this.onlineServers$dryrun);
+      boolean online = this.onlineServers$dryrun.containsKey(sn);
+      if (online) {
+        // Remove the server from the known servers lists and update load info BUT
+        // add to deadservers first; do this so it'll show in dead servers list if
+        // not in online servers list.
+        this.deadservers$dryrun = DryRunManager.shallowCopy(this.deadservers, this.deadservers$dryrun);
+        this.deadservers$dryrun.putIfAbsent(sn);
+        this.onlineServers$dryrun = DryRunManager.shallowCopy(this.onlineServers, this.onlineServers$dryrun);
+        this.onlineServers$dryrun.remove(sn);
+        this.onlineServers$dryrun = DryRunManager.shallowCopy(this.onlineServers, this.onlineServers$dryrun);
+        this.onlineServers$dryrun.notifyAll();
       } else {
         // If not online, that is odd but may happen if 'Unknown Servers' -- where meta
         // has references to servers not online nor in dead servers list. If

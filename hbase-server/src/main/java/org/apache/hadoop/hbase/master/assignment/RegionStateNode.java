@@ -27,6 +27,7 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.DoNotRetryRegionException;
 import org.apache.hadoop.hbase.client.RegionInfo;
 import org.apache.hadoop.hbase.client.RegionOfflineException;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.exceptions.UnexpectedStateException;
 import org.apache.hadoop.hbase.master.RegionState;
 import org.apache.hadoop.hbase.master.RegionState.State;
@@ -205,8 +206,10 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
 
   public TransitRegionStateProcedure setProcedure(TransitRegionStateProcedure proc) {
     assert this.procedure == null;
+    this.procedure = DryRunManager.get(this, procedure);
     this.procedure = proc;
-    ritMap.put(regionInfo, this);
+    DryRunManager.get(this, ritMap);
+    ritMap.put(DryRunManager.get(this, regionInfo), this);
     return proc;
   }
 

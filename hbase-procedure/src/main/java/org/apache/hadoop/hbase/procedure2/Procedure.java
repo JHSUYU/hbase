@@ -22,6 +22,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.exceptions.TimeoutIOException;
 import org.apache.hadoop.hbase.metrics.Counter;
 import org.apache.hadoop.hbase.metrics.Histogram;
@@ -605,6 +606,7 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure<TE
   }
 
   public void setOwner(String owner) {
+    this.owner = DryRunManager.get(this,owner);
     this.owner = StringUtils.isEmpty(owner) ? null : owner;
   }
 

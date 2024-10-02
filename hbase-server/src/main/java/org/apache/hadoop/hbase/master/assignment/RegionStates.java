@@ -37,9 +37,11 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.RegionInfo;
 import org.apache.hadoop.hbase.client.TableState;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.master.RegionState;
 import org.apache.hadoop.hbase.master.RegionState.State;
 import org.apache.hadoop.hbase.master.TableStateManager;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -99,6 +101,8 @@ public class RegionStates {
 
   private final ConcurrentHashMap<ServerName, ServerStateNode> serverMap =
     new ConcurrentHashMap<ServerName, ServerStateNode>();
+
+  public ConcurrentHashMap<ServerName, ServerStateNode> serverMap$dryrun = null;
 
   public RegionStates() {
   }
@@ -763,7 +767,15 @@ public class RegionStates {
 
   /** Returns Pertinent ServerStateNode or NULL if none found (Do not make modifications). */
   public ServerStateNode getServerNode(final ServerName serverName) {
+    if(TraceUtil.isDryRun()){
+      return getServerNode$instrumentation(serverName);
+    }
     return serverMap.get(serverName);
+  }
+
+  public ServerStateNode getServerNode$instrumentation(final ServerName serverName) {
+    this.serverMap$dryrun = DryRunManager.shallowCopy(serverMap, serverMap$dryrun);
+    return serverMap$dryrun.get(serverName);
   }
 
   public double getAverageLoad() {

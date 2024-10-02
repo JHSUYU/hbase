@@ -22,6 +22,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.conf.ConfigurationObserver;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.ipc.RpcServer;
 import org.apache.hadoop.hbase.master.MasterCoprocessorHost;
 import org.apache.hadoop.hbase.master.MasterFileSystem;
@@ -91,7 +92,7 @@ public class MasterProcedureEnv implements ConfigurationObserver {
   }
 
   public MasterServices getMasterServices() {
-    return master;
+    return DryRunManager.get(this, master);
   }
 
   public Configuration getMasterConfiguration() {

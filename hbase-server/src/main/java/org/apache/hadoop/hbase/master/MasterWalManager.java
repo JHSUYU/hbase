@@ -34,6 +34,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathFilter;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.ServerName;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.regionserver.wal.AbstractFSWAL;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
@@ -296,7 +297,7 @@ public class MasterWalManager {
   List<Path> getLogDirs(final Set<ServerName> serverNames) throws IOException {
     List<Path> logDirs = new ArrayList<>();
     boolean needReleaseLock = false;
-    if (!this.services.isInitialized()) {
+    if (!DryRunManager.get(this, services).isInitialized()) {
       // during master initialization, we could have multiple places splitting a same wal
       // XXX: Does this still exist after we move to proc-v2?
       this.splitLogLock.lock();
@@ -322,12 +323,12 @@ public class MasterWalManager {
       }
     } catch (IOException ioe) {
       if (!checkFileSystem()) {
-        this.services.abort("Aborting due to filesystem unavailable", ioe);
+        DryRunManager.get(this, services).abort("Aborting due to filesystem unavailable", ioe);
         throw ioe;
       }
     } finally {
       if (needReleaseLock) {
-        this.splitLogLock.unlock();
+        DryRunManager.get(this, splitLogLock).unlock();
       }
     }
     return logDirs;

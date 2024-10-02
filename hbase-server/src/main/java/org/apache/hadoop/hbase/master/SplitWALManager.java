@@ -37,6 +37,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathIsNotEmptyDirectoryException;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.ServerName;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureScheduler;
 import org.apache.hadoop.hbase.master.procedure.SplitWALProcedure;
 import org.apache.hadoop.hbase.procedure2.Procedure;
@@ -101,7 +102,7 @@ public class SplitWALManager {
 
   public List<FileStatus> getWALsToSplit(ServerName serverName, boolean splitMeta)
     throws IOException {
-    List<Path> logDirs = master.getMasterWalManager().getLogDirs(Collections.singleton(serverName));
+    List<Path> logDirs = DryRunManager.get(this, master).getMasterWalManager().getLogDirs(Collections.singleton(serverName));
     List<FileStatus> fileStatuses =
       SplitLogManager.getFileList(this.conf, logDirs, splitMeta ? META_FILTER : NON_META_FILTER);
     LOG.info("{} WAL count={}, meta={}", serverName, fileStatuses.size(), splitMeta);

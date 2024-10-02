@@ -3535,6 +3535,7 @@ public class RSRpcServices
 
   public ScanResponse scan$instrumentation(final RpcController controller, final ScanRequest request)
     throws ServiceException {
+
     if (controller != null && !(controller instanceof HBaseRpcController)) {
       throw new UnsupportedOperationException(
         "We only do " + "HBaseRpcControllers! FIX IF A PROBLEM: " + controller);

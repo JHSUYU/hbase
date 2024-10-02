@@ -17,9 +17,13 @@
  */
 package org.apache.hadoop.hbase.replication.regionserver;
 
+import com.rits.cloning.Cloner;
 import org.apache.hadoop.hbase.ServerName;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.executor.EventType;
 import org.apache.hadoop.hbase.procedure2.BaseRSProcedureCallable;
+import org.apache.hadoop.hbase.regionserver.HRegionServer;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.yetus.audience.InterfaceAudience;
 
 import org.apache.hbase.thirdparty.com.google.protobuf.InvalidProtocolBufferException;
@@ -41,6 +45,18 @@ public class ClaimReplicationQueueCallable extends BaseRSProcedureCallable {
 
   @Override
   protected void doCall() throws Exception {
+//    if(TraceUtil.isDryRun()){
+//      doCall$instrumentation();
+//      return;
+//    }
+    PeerProcedureHandler handler = rs.getReplicationSourceService().getPeerProcedureHandler();
+    handler.claimReplicationQueue(crashedServer, queue);
+  }
+
+  protected void doCall$instrumentation() throws Exception {
+
+    DryRunManager.track(this, rs);
+    rs = DryRunManager.get(this, rs);
     PeerProcedureHandler handler = rs.getReplicationSourceService().getPeerProcedureHandler();
     handler.claimReplicationQueue(crashedServer, queue);
   }

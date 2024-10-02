@@ -45,6 +45,7 @@ import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.exceptions.IllegalArgumentIOException;
 import org.apache.hadoop.hbase.log.HBaseMarkers;
 import org.apache.hadoop.hbase.procedure2.Procedure.LockState;
@@ -776,7 +777,7 @@ public class ProcedureExecutor<TEnvironment> {
   }
 
   public TEnvironment getEnvironment() {
-    return this.environment;
+    return DryRunManager.get(this, environment);
   }
 
   public ProcedureStore getStore() {

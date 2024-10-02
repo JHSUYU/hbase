@@ -56,6 +56,7 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.TableState;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.exceptions.UnexpectedStateException;
 import org.apache.hadoop.hbase.favored.FavoredNodesManager;
 import org.apache.hadoop.hbase.favored.FavoredNodesPromoter;
@@ -167,6 +168,7 @@ public class AssignmentManager {
 
   private final AtomicBoolean running = new AtomicBoolean(false);
   private final RegionStates regionStates = new RegionStates();
+  public RegionStates regionStates$dryrun = null;
   private final RegionStateStore regionStateStore;
 
   /**
@@ -192,6 +194,7 @@ public class AssignmentManager {
   private static final String DEFAULT_MIN_VERSION_MOVE_SYS_TABLES_CONFIG = "";
 
   private final Map<ServerName, Set<byte[]>> rsReports = new HashMap<>();
+  public Map<ServerName, Set<byte[]>> rsReports$dryrun = null;
 
   private final boolean shouldAssignRegionsWithFavoredNodes;
   private final int assignDispatchWaitQueueMaxSize;
@@ -414,8 +417,18 @@ public class AssignmentManager {
   }
 
   public RegionStates getRegionStates() {
+    if(TraceUtil.isDryRun()){
+      return getRegionStates$instrumentation();
+    }
     return regionStates;
   }
+
+  public RegionStates getRegionStates$instrumentation(){
+    this.regionStates$dryrun = DryRunManager.shallowCopy(regionStates, regionStates$dryrun);
+    return regionStates$dryrun;
+  }
+
+
 
   /**
    * Returns the regions hosted by the specified server.
@@ -1856,11 +1869,14 @@ public class AssignmentManager {
    * @return pid of scheduled SCP or {@link Procedure#NO_PROC_ID} if none scheduled.
    */
   public long submitServerCrash(ServerName serverName, boolean shouldSplitWal, boolean force) {
+    if(TraceUtil.isDryRun()){
+      return submitServerCrash$instrumentation(serverName, shouldSplitWal, force);
+    }
     // May be an 'Unknown Server' so handle case where serverNode is null.
-    ServerStateNode serverNode = regionStates.getServerNode(serverName);
+    ServerStateNode serverNode = this.regionStates.getServerNode(serverName);
     // Remove the in-memory rsReports result
-    synchronized (rsReports) {
-      rsReports.remove(serverName);
+    synchronized (this.rsReports) {
+      this.rsReports.remove(serverName);
     }
 
     // We hold the write lock here for fencing on reportRegionStateTransition. Once we set the
@@ -1873,7 +1889,7 @@ public class AssignmentManager {
     boolean carryingMeta;
     long pid;
     try {
-      ProcedureExecutor<MasterProcedureEnv> procExec = this.master.getMasterProcedureExecutor();
+      ProcedureExecutor<MasterProcedureEnv> procExec = master.getMasterProcedureExecutor();
       carryingMeta = isCarryingMeta(serverName);
       if (!force && serverNode != null && !serverNode.isInState(ServerState.ONLINE)) {
         LOG.info("Skip adding ServerCrashProcedure for {} (meta={}) -- running?", serverNode,
@@ -1914,10 +1930,12 @@ public class AssignmentManager {
     // May be an 'Unknown Server' so handle case where serverNode is null.
     boolean isDryRun = TraceUtil.isDryRun();
     LOG.info("Failure Recovery, isDryRun in submitServerCrash$instrumentation is " + isDryRun);
-    ServerStateNode serverNode = regionStates.getServerNode(serverName);
+    this.regionStates$dryrun = DryRunManager.shallowCopy(this.regionStates, this.regionStates$dryrun);
+    ServerStateNode serverNode = this.regionStates$dryrun.getServerNode(serverName);
     // Remove the in-memory rsReports result
-    synchronized (rsReports) {
-      rsReports.remove(serverName);
+    this.rsReports$dryrun = DryRunManager.shallowCopy(this.rsReports, this.rsReports$dryrun);
+    synchronized (rsReports$dryrun) {
+      rsReports$dryrun.remove(serverName);
     }
 
     // We hold the write lock here for fencing on reportRegionStateTransition. Once we set the
@@ -1932,7 +1950,7 @@ public class AssignmentManager {
     try {
       ProcedureExecutor<MasterProcedureEnv> procExec = this.master.getMasterProcedureExecutor();
       if(this.master instanceof HMaster) {
-        procExec = ((HMaster)master).getMasterProcedureExecutor$instrumentation();
+        procExec = ((HMaster)master).getMasterProcedureExecutor();
       }
       carryingMeta = isCarryingMeta(serverName);
       if (!force && serverNode != null && !serverNode.isInState(ServerState.ONLINE)) {
