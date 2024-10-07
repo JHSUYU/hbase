@@ -78,12 +78,15 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
 
   final Lock lock = new ReentrantLock();
   private final RegionInfo regionInfo;
+  public RegionInfo regionInfo$dryrun = null;
   private final ProcedureEvent<?> event;
   private final ConcurrentMap<RegionInfo, RegionStateNode> ritMap;
+  public ConcurrentMap<RegionInfo, RegionStateNode> ritMap$dryrun = null;
 
   // volatile only for getLastUpdate and test usage, the upper layer should sync on the
   // RegionStateNode before accessing usually.
   private volatile TransitRegionStateProcedure procedure = null;
+  public  TransitRegionStateProcedure procedure$dryrun = null;
   private volatile ServerName regionLocation = null;
   // notice that, the lastHost will only be updated when a region is successfully CLOSED through
   // UnassignProcedure, so do not use it for critical condition as the data maybe stale and unsync
@@ -205,11 +208,12 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
   }
 
   public TransitRegionStateProcedure setProcedure(TransitRegionStateProcedure proc) {
-    assert this.procedure == null;
-    this.procedure = DryRunManager.get(this, procedure);
-    this.procedure = proc;
-    DryRunManager.get(this, ritMap);
-    ritMap.put(DryRunManager.get(this, regionInfo), this);
+    this.procedure$dryrun = DryRunManager.shallowCopy(this.procedure, this.procedure$dryrun);
+    assert this.procedure$dryrun == null;
+    this.procedure$dryrun = proc;
+    this.ritMap$dryrun = DryRunManager.shallowCopy(this.ritMap, this.ritMap$dryrun);
+    this.regionInfo$dryrun = DryRunManager.shallowCopy(this.regionInfo, this.regionInfo$dryrun);
+    this.ritMap$dryrun.put(this.regionInfo$dryrun, this);
     return proc;
   }
 

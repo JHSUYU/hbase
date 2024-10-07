@@ -151,8 +151,9 @@ public class DryRunManager {
   public static <T> T shallowCopy(T obj, T obj$dryrun){
     if(obj$dryrun == null){
       return cloner.shallowClone(obj);
+    }else{
+      return obj$dryrun;
     }
-    return obj$dryrun;
   }
 
   private static Object createBasicTypeProxy(Object value) {

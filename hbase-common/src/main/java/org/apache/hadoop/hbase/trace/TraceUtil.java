@@ -256,6 +256,7 @@ public final class TraceUtil {
   }
 
   public static boolean isDryRun() {
-    return Baggage.current().getEntryValue(DRY_RUN_KEY) != null && Boolean.parseBoolean(Baggage.current().getEntryValue(DRY_RUN_KEY));
+    //return Baggage.current().getEntryValue(DRY_RUN_KEY) != null && Boolean.parseBoolean(Baggage.current().getEntryValue(DRY_RUN_KEY));
+    return false;
   }
 }

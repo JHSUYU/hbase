@@ -1516,9 +1516,7 @@ public class HMaster extends HRegionServer implements MasterServices {
   }
 
   public ServerManager getServerManager$instrumentation() {
-    if(this.serverManager$dryrun == null){
-      this.serverManager$dryrun = DryRunManager.cloner.shallowClone(this.serverManager);
-    }
+    this.serverManager$dryrun = DryRunManager.shallowCopy(this.serverManager, this.serverManager$dryrun);
     return this.serverManager$dryrun;
   }
 

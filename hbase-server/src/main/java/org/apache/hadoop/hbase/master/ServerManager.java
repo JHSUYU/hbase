@@ -136,6 +136,7 @@ public class ServerManager {
   public MasterServices master$dryrun = null;
   private final ClusterConnection connection;
   private final RegionServerList storage;
+  public RegionServerList storage$dryrun;
 
   private final DeadServer deadservers = new DeadServer();
 
@@ -599,7 +600,8 @@ public class ServerManager {
     LOG.info("Failure Recovery, isDryRun in ServerManager is " + isDryRun);
     this.master$dryrun = DryRunManager.get(this.master, this.master$dryrun);
     long pid = master$dryrun.getAssignmentManager().submitServerCrash(serverName, true, force);
-    storage.expired(serverName);
+    this.storage$dryrun = DryRunManager.get(this.storage, this.storage$dryrun);
+    storage$dryrun.expired(serverName);
     // Tell our listeners that a server was removed
     if (!this.listeners.isEmpty()) {
       this.listeners.stream().forEach(l -> l.serverRemoved(serverName));
@@ -648,7 +650,7 @@ public class ServerManager {
       return Procedure.NO_PROC_ID;
     }
     LOG.info("Processing expiration of " + serverName + " on " + this.master.getServerName());
-    long pid = DryRunManager.get(this, master).getAssignmentManager().submitServerCrash(serverName, true, force);
+    long pid = this.master.getAssignmentManager().submitServerCrash(serverName, true, force);
     storage.expired(serverName);
     // Tell our listeners that a server was removed
     if (!this.listeners.isEmpty()) {

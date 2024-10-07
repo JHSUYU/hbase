@@ -535,6 +535,7 @@ public class HStore
    * the replaying edits from WAL
    */
   public void startReplayingFromWAL() {
+    LOG.info("memStore class name is " + memstore.getClass().getName());
     this.memstore.startReplayingFromWAL();
   }
 

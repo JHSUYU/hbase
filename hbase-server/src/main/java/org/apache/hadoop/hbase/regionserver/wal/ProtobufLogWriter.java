@@ -56,6 +56,7 @@ public class ProtobufLogWriter extends AbstractProtobufLogWriter implements FSHL
       .writeDelimitedTo(output);
     for (Cell cell : entry.getEdit().getCells()) {
       // cellEncoder must assume little about the stream, since we write PB and cells in turn.
+      LOG.info("Failure Recovery cellEncoder classname is {}", cellEncoder.getClass().getName());
       cellEncoder.write(cell);
     }
     length.set(output.getPos());

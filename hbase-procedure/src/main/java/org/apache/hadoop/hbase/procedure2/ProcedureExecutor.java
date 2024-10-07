@@ -777,7 +777,8 @@ public class ProcedureExecutor<TEnvironment> {
   }
 
   public TEnvironment getEnvironment() {
-    return DryRunManager.get(this, environment);
+    LOG.info("classname of environment is {}", environment.getClass().getName());
+    return this.environment;
   }
 
   public ProcedureStore getStore() {
@@ -1111,6 +1112,7 @@ public class ProcedureExecutor<TEnvironment> {
     proc.setProcId(currentProcId.longValue());
 
     // Commit the transaction
+    LOG.info("class name of store is {}", store.getClass().getName());
     store.insert(proc, null);
     LOG.debug("Stored {}", proc);
 

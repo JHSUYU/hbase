@@ -248,7 +248,6 @@ public class RegionServerTracker extends ZKListener {
       if (active) {
         processAsActiveMaster(newServers);
       }
-      this.regionServers = DryRunManager.get(this, regionServers);
       this.regionServers = newServers;
       span.setStatus(StatusCode.OK);
     } finally {
@@ -275,8 +274,8 @@ public class RegionServerTracker extends ZKListener {
       if (active) {
         processAsActiveMaster(newServers);
       }
-      this.regionServers = DryRunManager.get(this, regionServers);
-      this.regionServers = newServers;
+      this.regionServers$dryrun = DryRunManager.shallowCopy(this.regionServers, this.regionServers$dryrun);
+      this.regionServers$dryrun = newServers;
       span.setStatus(StatusCode.OK);
     } finally {
       span.end();
@@ -320,10 +319,10 @@ public class RegionServerTracker extends ZKListener {
     if (
       path.equals(watcher.getZNodePaths().rsZNode) && !server.isAborted() && !server.isStopped()
     ) {
-      Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
-      Context dryRunContext = Context.current().with(dryRunBaggage);
-      dryRunBaggage.makeCurrent();
-      dryRunContext.makeCurrent();
+//      Baggage dryRunBaggage = TraceUtil.createDryRunBaggage();
+//      Context dryRunContext = Context.current().with(dryRunBaggage);
+//      dryRunBaggage.makeCurrent();
+//      dryRunContext.makeCurrent();
       executor.execute(this::refresh);
     }
 

@@ -102,7 +102,7 @@ public class SplitWALManager {
 
   public List<FileStatus> getWALsToSplit(ServerName serverName, boolean splitMeta)
     throws IOException {
-    List<Path> logDirs = DryRunManager.get(this, master).getMasterWalManager().getLogDirs(Collections.singleton(serverName));
+    List<Path> logDirs = this.master.getMasterWalManager().getLogDirs(Collections.singleton(serverName));
     List<FileStatus> fileStatuses =
       SplitLogManager.getFileList(this.conf, logDirs, splitMeta ? META_FILTER : NON_META_FILTER);
     LOG.info("{} WAL count={}, meta={}", serverName, fileStatuses.size(), splitMeta);
