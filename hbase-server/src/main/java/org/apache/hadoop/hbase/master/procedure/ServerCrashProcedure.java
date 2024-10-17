@@ -45,6 +45,7 @@ import org.apache.hadoop.hbase.procedure2.ProcedureStateSerializer;
 import org.apache.hadoop.hbase.procedure2.ProcedureSuspendedException;
 import org.apache.hadoop.hbase.procedure2.ProcedureYieldException;
 import org.apache.hadoop.hbase.procedure2.StateMachineProcedure;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,6 +67,8 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProcedureProtos.S
 @InterfaceAudience.Private
 public class ServerCrashProcedure extends
   StateMachineProcedure<MasterProcedureEnv, ServerCrashState> implements ServerProcedureInterface {
+  public boolean isDryRun = false;
+
   private static final Logger LOG = LoggerFactory.getLogger(ServerCrashProcedure.class);
 
   /**
@@ -119,6 +122,15 @@ public class ServerCrashProcedure extends
     this.setOwner(env.getRequestUser());
   }
 
+  public ServerCrashProcedure(final MasterProcedureEnv env, final ServerName serverName,
+    final boolean shouldSplitWal, final boolean carryingMeta, boolean isDryRun) {
+    this.isDryRun = isDryRun;
+    this.serverName = serverName;
+    this.shouldSplitWal = shouldSplitWal;
+    this.carryingMeta = carryingMeta;
+    this.setOwner(env.getRequestUser());
+  }
+
   /**
    * Used when deserializing from a procedure store; we'll construct one of these then call
    * #deserializeStateData(InputStream). Do not use directly.
@@ -130,9 +142,10 @@ public class ServerCrashProcedure extends
     return getCurrentState() == ServerCrashState.SERVER_CRASH_PROCESS_META;
   }
 
-  @Override
-  protected Flow executeFromState(MasterProcedureEnv env, ServerCrashState state)
+  protected Flow executeFromState$instrumentation(MasterProcedureEnv env, ServerCrashState state)
     throws ProcedureSuspendedException, ProcedureYieldException {
+    LOG.info("ServerCrashProcedure execute state={}", state);
+
     final MasterServices services = env.getMasterServices();
     final AssignmentManager am = env.getAssignmentManager();
     updateProgress(true);
@@ -140,6 +153,9 @@ public class ServerCrashProcedure extends
     // This adds server to the DeadServer processing list but not to the DeadServers list.
     // Server gets removed from processing list below on procedure successful finish.
     if (!notifiedDeadServer) {
+      LOG.debug("Failure Recovery, services is " + services);
+      LOG.debug("Failure Recovery, services.getServerManager() is " + services.getServerManager());
+      LOG.debug("Failure Recovery, services.getServerManager().getDeadServers() is " + services.getServerManager().getDeadServers());
       services.getServerManager().getDeadServers().processing(serverName);
       notifiedDeadServer = true;
     }
@@ -172,9 +188,159 @@ public class ServerCrashProcedure extends
             env.getMasterConfiguration().getBoolean(HBASE_SPLIT_WAL_COORDINATED_BY_ZK,
               DEFAULT_HBASE_SPLIT_COORDINATED_BY_ZK)
           ) {
+            LOG.debug("Failure Recovery, Zookeeper Splitting meta WALs {}", this);
             zkCoordinatedSplitMetaLogs(env);
             setNextState(ServerCrashState.SERVER_CRASH_ASSIGN_META);
           } else {
+            LOG.debug("Failure Recovery, Procedure Splitting meta WALs {}", this);
+            am.getRegionStates().metaLogSplitting(serverName);
+            addChildProcedure(createSplittingWalProcedures(env, true));
+            setNextState(ServerCrashState.SERVER_CRASH_DELETE_SPLIT_META_WALS_DIR);
+          }
+          break;
+        case SERVER_CRASH_DELETE_SPLIT_META_WALS_DIR:
+          if (isSplittingDone(env, true)) {
+            setNextState(ServerCrashState.SERVER_CRASH_ASSIGN_META);
+            am.getRegionStates().metaLogSplit(serverName);
+          } else {
+            setNextState(ServerCrashState.SERVER_CRASH_SPLIT_META_LOGS);
+          }
+          break;
+        case SERVER_CRASH_ASSIGN_META:
+          assignRegions(env, Arrays.asList(RegionInfoBuilder.FIRST_META_REGIONINFO));
+          setNextState(ServerCrashState.SERVER_CRASH_GET_REGIONS);
+          break;
+        case SERVER_CRASH_GET_REGIONS:
+          this.regionsOnCrashedServer = getRegionsOnCrashedServer(env);
+          // Where to go next? Depends on whether we should split logs at all or
+          // if we should do distributed log splitting.
+          if (regionsOnCrashedServer != null) {
+            LOG.info("{} had {} regions", serverName, regionsOnCrashedServer.size());
+            if (LOG.isTraceEnabled()) {
+              this.regionsOnCrashedServer.stream().forEach(ri -> LOG.trace(ri.getShortNameToLog()));
+            }
+          }
+          if (!this.shouldSplitWal) {
+            setNextState(ServerCrashState.SERVER_CRASH_ASSIGN);
+          } else {
+            setNextState(ServerCrashState.SERVER_CRASH_SPLIT_LOGS);
+          }
+          break;
+        case SERVER_CRASH_SPLIT_LOGS:
+          if (
+            env.getMasterConfiguration().getBoolean(HBASE_SPLIT_WAL_COORDINATED_BY_ZK,
+              DEFAULT_HBASE_SPLIT_COORDINATED_BY_ZK)
+          ) {
+            zkCoordinatedSplitLogs(env);
+            setNextState(ServerCrashState.SERVER_CRASH_ASSIGN);
+          } else {
+            am.getRegionStates().logSplitting(this.serverName);
+            addChildProcedure(createSplittingWalProcedures(env, false));
+            setNextState(ServerCrashState.SERVER_CRASH_DELETE_SPLIT_WALS_DIR);
+          }
+          break;
+        case SERVER_CRASH_DELETE_SPLIT_WALS_DIR:
+          if (isSplittingDone(env, false)) {
+            cleanupSplitDir(env);
+            setNextState(ServerCrashState.SERVER_CRASH_ASSIGN);
+            am.getRegionStates().logSplit(this.serverName);
+          } else {
+            setNextState(ServerCrashState.SERVER_CRASH_SPLIT_LOGS);
+          }
+          break;
+        case SERVER_CRASH_ASSIGN:
+          // If no regions to assign, skip assign and skip to the finish.
+          // Filter out meta regions. Those are handled elsewhere in this procedure.
+          // Filter changes this.regionsOnCrashedServer.
+          if (filterDefaultMetaRegions()) {
+            if (LOG.isTraceEnabled()) {
+              LOG.trace("Assigning regions " + RegionInfo.getShortNameToLog(regionsOnCrashedServer)
+                + ", " + this + "; cycles=" + getCycles());
+            }
+            assignRegions(env, regionsOnCrashedServer);
+          }
+          setNextState(ServerCrashState.SERVER_CRASH_CLAIM_REPLICATION_QUEUES);
+          break;
+        case SERVER_CRASH_HANDLE_RIT2:
+          // Noop. Left in place because we used to call handleRIT here for a second time
+          // but no longer necessary since HBASE-20634.
+          setNextState(ServerCrashState.SERVER_CRASH_CLAIM_REPLICATION_QUEUES);
+          break;
+        case SERVER_CRASH_CLAIM_REPLICATION_QUEUES:
+          addChildProcedure(new ClaimReplicationQueuesProcedure(serverName));
+          setNextState(ServerCrashState.SERVER_CRASH_FINISH);
+          break;
+        case SERVER_CRASH_FINISH:
+          LOG.info("removed crashed server {} after splitting done", serverName);
+          services.getAssignmentManager().getRegionStates().removeServer(serverName);
+          services.getServerManager().getDeadServers().finish(serverName);
+          updateProgress(true);
+          return Flow.NO_MORE_STATE;
+        default:
+          throw new UnsupportedOperationException("unhandled state=" + state);
+      }
+    } catch (IOException e) {
+      LOG.warn("Failed state=" + state + ", retry " + this + "; cycles=" + getCycles(), e);
+    }
+    return Flow.HAS_MORE_STATE;
+  }
+
+  @Override
+  protected Flow executeFromState(MasterProcedureEnv env, ServerCrashState state)
+    throws ProcedureSuspendedException, ProcedureYieldException {
+    LOG.info("ServerCrashProcedure execute state={}", state);
+    if(isDryRun) {
+      LOG.debug("Failure Recovery, Trapped into dry-run mode");
+      TraceUtil.createDryRunBaggage();
+      return executeFromState$instrumentation(env, state);
+    }
+    final MasterServices services = env.getMasterServices();
+    final AssignmentManager am = env.getAssignmentManager();
+    updateProgress(true);
+    // HBASE-14802 If we have not yet notified that we are processing a dead server, do so now.
+    // This adds server to the DeadServer processing list but not to the DeadServers list.
+    // Server gets removed from processing list below on procedure successful finish.
+    if (!notifiedDeadServer) {
+      LOG.debug("Failure Recovery, services is " + services);
+      LOG.debug("Failure Recovery, services.getServerManager() is " + services.getServerManager());
+      LOG.debug("Failure Recovery, services.getServerManager().getDeadServers() is " + services.getServerManager().getDeadServers());
+      services.getServerManager().getDeadServers().processing(serverName);
+      notifiedDeadServer = true;
+    }
+
+    switch (state) {
+      case SERVER_CRASH_START:
+      case SERVER_CRASH_SPLIT_META_LOGS:
+      case SERVER_CRASH_DELETE_SPLIT_META_WALS_DIR:
+      case SERVER_CRASH_ASSIGN_META:
+        break;
+      default:
+        // If hbase:meta is not assigned, yield.
+        if (env.getAssignmentManager().waitMetaLoaded(this)) {
+          throw new ProcedureSuspendedException();
+        }
+    }
+    try {
+      switch (state) {
+        case SERVER_CRASH_START:
+          LOG.info("Start " + this);
+          // If carrying meta, process it first. Else, get list of regions on crashed server.
+          if (this.carryingMeta) {
+            setNextState(ServerCrashState.SERVER_CRASH_SPLIT_META_LOGS);
+          } else {
+            setNextState(ServerCrashState.SERVER_CRASH_GET_REGIONS);
+          }
+          break;
+        case SERVER_CRASH_SPLIT_META_LOGS:
+          if (
+            env.getMasterConfiguration().getBoolean(HBASE_SPLIT_WAL_COORDINATED_BY_ZK,
+              DEFAULT_HBASE_SPLIT_COORDINATED_BY_ZK)
+          ) {
+            LOG.debug("Failure Recovery, Zookeeper Splitting meta WALs {}", this);
+            zkCoordinatedSplitMetaLogs(env);
+            setNextState(ServerCrashState.SERVER_CRASH_ASSIGN_META);
+          } else {
+            LOG.debug("Failure Recovery, Procedure Splitting meta WALs {}", this);
             am.getRegionStates().metaLogSplitting(serverName);
             addChildProcedure(createSplittingWalProcedures(env, true));
             setNextState(ServerCrashState.SERVER_CRASH_DELETE_SPLIT_META_WALS_DIR);
@@ -305,6 +471,7 @@ public class ServerCrashProcedure extends
     LOG.info("Splitting WALs {}, isMeta: {}", this, splitMeta);
     SplitWALManager splitWALManager = env.getMasterServices().getSplitWALManager();
     List<Procedure> procedures = splitWALManager.splitWALs(serverName, splitMeta);
+    LOG.debug("Failure Recovery, procedures size is " + procedures.size());
     return procedures.toArray(new Procedure[procedures.size()]);
   }
 
@@ -494,6 +661,16 @@ public class ServerCrashProcedure extends
    * @return True if the region location in <code>rsn</code> matches that of this crashed server.
    */
   protected boolean isMatchingRegionLocation(RegionStateNode rsn) {
+    if(TraceUtil.isDryRun()){
+      LOG.info("Failure Recovery, redirect isMatchingRegionLocation$instrumentation");
+      return isMatchingRegionLocation$instrumentation(rsn);
+    }
+    LOG.debug("Failure Recovery, isMatchingRegionLocation, serverName is " + this.serverName.equals(rsn.getRegionLocation()));
+    return this.serverName.equals(rsn.getRegionLocation());
+  }
+
+  protected boolean isMatchingRegionLocation$instrumentation(RegionStateNode rsn) {
+    LOG.debug("Failure Recovery, isMatchingRegionLocation, serverName is " + this.serverName.equals(rsn.getRegionLocation()));
     return this.serverName.equals(rsn.getRegionLocation());
   }
 
@@ -508,11 +685,18 @@ public class ServerCrashProcedure extends
    * it.
    */
   private void assignRegions(MasterProcedureEnv env, List<RegionInfo> regions) throws IOException {
+    if(TraceUtil.isDryRun()){
+      LOG.info("Failure Recovery, redirect assignRegions$instrumentation");
+      assignRegions$instrumentation(env, regions);
+      return;
+    }
     AssignmentManager am = env.getMasterServices().getAssignmentManager();
     boolean retainAssignment = env.getMasterConfiguration().getBoolean(MASTER_SCP_RETAIN_ASSIGNMENT,
       DEFAULT_MASTER_SCP_RETAIN_ASSIGNMENT);
     for (RegionInfo region : regions) {
+      LOG.debug("Failure Recovery -, assignRegions, region is " + region);
       RegionStateNode regionNode = am.getRegionStates().getOrCreateRegionStateNode(region);
+      LOG.debug("Failure Recovery -, assignRegions, regionNode is " + regionNode);
       regionNode.lock();
       try {
         // This is possible, as when a server is dead, TRSP will fail to schedule a RemoteProcedure
@@ -545,13 +729,74 @@ public class ServerCrashProcedure extends
           env.getMasterServices().getTableStateManager().isTableState(regionNode.getTable(),
             TableState.State.DISABLED)
         ) {
+          LOG.debug("Failure Recovery, assignRegions, table is disabled, regionNode is " + regionNode);
+          // This should not happen, table disabled but has regions on server.
+          LOG.warn("Found table disabled for region {}, procDetails: {}", regionNode, this);
+          continue;
+        }
+        LOG.debug("Failure Recovery not in, assignRegions$instrumentation, regionNode is not matching, regionNode is " + regionNode);
+        TransitRegionStateProcedure proc =
+          TransitRegionStateProcedure.assign(env, region, !retainAssignment, null);
+        regionNode.setProcedure(proc);
+        addChildProcedure(proc);
+      } finally {
+        regionNode.unlock();
+      }
+    }
+  }
+
+  private void assignRegions$instrumentation(MasterProcedureEnv env, List<RegionInfo> regions) throws IOException {
+    AssignmentManager am = env.getMasterServices().getAssignmentManager();
+    boolean retainAssignment = env.getMasterConfiguration().getBoolean(MASTER_SCP_RETAIN_ASSIGNMENT,
+      DEFAULT_MASTER_SCP_RETAIN_ASSIGNMENT);
+    for (RegionInfo region : regions) {
+      LOG.debug("Failure Recovery, assignRegions, region is " + region);
+      RegionStateNode regionNode = am.getRegionStates().getOrCreateRegionStateNode(region);
+      LOG.debug("Failure Recovery, assignRegions, regionNode is " + regionNode);
+      regionNode.lock();
+      try {
+        LOG.debug("Failure Recovery, assignRegions$instrumentation, regionNode is " + regionNode);
+        // This is possible, as when a server is dead, TRSP will fail to schedule a RemoteProcedure
+        // and then try to assign the region to a new RS. And before it has updated the region
+        // location to the new RS, we may have already called the am.getRegionsOnServer so we will
+        // consider the region is still on this crashed server. Then before we arrive here, the
+        // TRSP could have updated the region location, or even finished itself, so the region is
+        // no longer on this crashed server any more. We should not try to assign it again. Please
+        // see HBASE-23594 for more details.
+        // UPDATE: HBCKServerCrashProcedure overrides isMatchingRegionLocation; this check can get
+        // in the way of our clearing out 'Unknown Servers'.
+        if (!isMatchingRegionLocation(regionNode)) {
+          LOG.debug("Failure Recovery, assignRegions$instrumentation, regionNode is not matching, regionNode is " + regionNode);
+          // See HBASE-24117, though we have already changed the shutdown order, it is still worth
+          // double checking here to confirm that we do not skip assignment incorrectly.
+          if (!am.isRunning()) {
+            LOG.debug("Failure Recovery, assignRegions$instrumentation, AssignmentManager has been stopped, can not process assignment any more");
+            throw new DoNotRetryIOException(
+              "AssignmentManager has been stopped, can not process assignment any more");
+          }
+          LOG.info("{} found {} whose regionLocation no longer matches {}, skipping assign...",
+            this, regionNode, serverName);
+          continue;
+        }
+        if (regionNode.getProcedure() != null) {
+          LOG.info("{} found RIT {}; {}", this, regionNode.getProcedure(), regionNode);
+          regionNode.getProcedure().serverCrashed(env, regionNode, getServerName(),
+            !retainAssignment);
+          continue;
+        }
+        if (
+          env.getMasterServices().getTableStateManager().isTableState(regionNode.getTable(),
+            TableState.State.DISABLED)
+        ) {
           // This should not happen, table disabled but has regions on server.
           LOG.warn("Found table disabled for region {}, procDetails: {}", regionNode, this);
           continue;
         }
         TransitRegionStateProcedure proc =
           TransitRegionStateProcedure.assign(env, region, !retainAssignment, null);
+        proc.isDryRun = TraceUtil.isDryRun();
         regionNode.setProcedure(proc);
+        LOG.debug("Failure Recovery, construct TransitRegionStateProcedure, proc is " + proc);
         addChildProcedure(proc);
       } finally {
         regionNode.unlock();

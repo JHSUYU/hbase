@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hbase.master.assignment;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.Lock;
@@ -27,10 +28,12 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.DoNotRetryRegionException;
 import org.apache.hadoop.hbase.client.RegionInfo;
 import org.apache.hadoop.hbase.client.RegionOfflineException;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.exceptions.UnexpectedStateException;
 import org.apache.hadoop.hbase.master.RegionState;
 import org.apache.hadoop.hbase.master.RegionState.State;
 import org.apache.hadoop.hbase.procedure2.ProcedureEvent;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -66,7 +69,7 @@ import org.slf4j.LoggerFactory;
  */
 @InterfaceAudience.Private
 public class RegionStateNode implements Comparable<RegionStateNode> {
-
+  public boolean isDryRun = false;
   private static final Logger LOG = LoggerFactory.getLogger(RegionStateNode.class);
 
   private static final class AssignmentProcedureEvent extends ProcedureEvent<RegionInfo> {
@@ -77,13 +80,17 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
 
   final Lock lock = new ReentrantLock();
   private final RegionInfo regionInfo;
+  private RegionInfo regionInfo$dryrun = null;
   private final ProcedureEvent<?> event;
   private final ConcurrentMap<RegionInfo, RegionStateNode> ritMap;
+  private ConcurrentMap<RegionInfo, RegionStateNode> ritMap$dryrun;
 
   // volatile only for getLastUpdate and test usage, the upper layer should sync on the
   // RegionStateNode before accessing usually.
   private volatile TransitRegionStateProcedure procedure = null;
+  private volatile TransitRegionStateProcedure procedure$dryrun = null;
   private volatile ServerName regionLocation = null;
+  private volatile ServerName regionLocation$dryrun = null;
   // notice that, the lastHost will only be updated when a region is successfully CLOSED through
   // UnassignProcedure, so do not use it for critical condition as the data maybe stale and unsync
   // with the data in meta.
@@ -100,6 +107,8 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
    */
   private volatile long lastUpdate = 0;
 
+  private volatile long lastUpdate$dryrun = 0;
+
   private volatile long openSeqNum = HConstants.NO_SEQNUM;
 
   RegionStateNode(RegionInfo regionInfo, ConcurrentMap<RegionInfo, RegionStateNode> ritMap) {
@@ -114,6 +123,8 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
    * @return true, if current state is in expected list; otherwise false.
    */
   public boolean setState(final State update, final State... expected) {
+    Exception e = new IOException();
+    e.printStackTrace();;
     if (!isInState(expected)) {
       return false;
     }
@@ -173,11 +184,38 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
    * more details on why we need to test two conditions.
    */
   public boolean isSplit() {
+    if(TraceUtil.isDryRun()){
+      LOG.info("Failure Recovery, isSplit redirect to isSplit$instrumentation");
+      return isSplit$instrumentation();
+    }
     return regionInfo.isSplit() || isInState(State.SPLIT);
   }
 
+  public boolean isSplit$instrumentation() {
+    if(regionInfo$dryrun == null){
+      regionInfo$dryrun = DryRunManager.clone(regionInfo);
+    }
+    return regionInfo$dryrun.isSplit() || isInState(State.SPLIT);
+  }
+
   public long getLastUpdate() {
+    if(TraceUtil.isDryRun()){
+      LOG.info("Failure Recovery, getLastUpdate redirect to getLastUpdate$instrumentation");
+      return getLastUpdate$instrumentation();
+    }
     TransitRegionStateProcedure proc = this.procedure;
+    if (proc != null) {
+      long lastUpdate = proc.getLastUpdate();
+      return lastUpdate != 0 ? lastUpdate : proc.getSubmittedTime();
+    }
+    return lastUpdate;
+  }
+
+  public long getLastUpdate$instrumentation() {
+    if(procedure$dryrun == null){
+      procedure$dryrun = DryRunManager.clone(procedure);
+    }
+    TransitRegionStateProcedure proc = this.procedure$dryrun;
     if (proc != null) {
       long lastUpdate = proc.getLastUpdate();
       return lastUpdate != 0 ? lastUpdate : proc.getSubmittedTime();
@@ -194,6 +232,10 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
   }
 
   public ServerName setRegionLocation(final ServerName serverName) {
+    if(TraceUtil.isDryRun()){
+      LOG.info("Failure Recovery, setRegionLocation redirect to setRegionLocation$instrumentation");
+      return setRegionLocation$instrumentation(serverName);
+    }
     ServerName lastRegionLocation = this.regionLocation;
     if (LOG.isTraceEnabled() && serverName == null) {
       LOG.trace("Tracking when we are set to null " + this, new Throwable("TRACE"));
@@ -203,21 +245,89 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
     return lastRegionLocation;
   }
 
+  public ServerName setRegionLocation$instrumentation(final ServerName serverName) {
+    if(regionLocation$dryrun == null){
+      regionLocation$dryrun = DryRunManager.clone(regionLocation);
+    }
+    ServerName lastRegionLocation = this.regionLocation$dryrun;
+    if (LOG.isTraceEnabled() && serverName == null) {
+      LOG.trace("Tracking when we are set to null " + this, new Throwable("TRACE"));
+    }
+    this.regionLocation$dryrun = serverName;
+    this.lastUpdate$dryrun = EnvironmentEdgeManager.currentTime();
+    return lastRegionLocation;
+  }
+
   public TransitRegionStateProcedure setProcedure(TransitRegionStateProcedure proc) {
+    if(TraceUtil.isDryRun()) {
+      LOG.info("Failure Recovery, setProcedure redirect to setProcedure$instrumentation");
+      return setProcedure$instrumentation(proc);
+    }
     assert this.procedure == null;
     this.procedure = proc;
+    LOG.debug("Failure Recovery, ritMap.className is " + ritMap.getClass().getName());
     ritMap.put(regionInfo, this);
     return proc;
   }
 
+  public TransitRegionStateProcedure setProcedure$instrumentation(TransitRegionStateProcedure proc) {
+
+    assert this.procedure == null;
+    if(procedure$dryrun == null){
+      this.procedure$dryrun = DryRunManager.clone(this.procedure);
+    }
+    this.procedure$dryrun = proc;
+    if(this.ritMap$dryrun == null){
+      LOG.debug("Failure Recovery, this.ritMap.className is {}, this.ritMap.size is {}", this.ritMap.getClass().getName(), this.ritMap.size());
+      this.ritMap$dryrun = DryRunManager.clone(this.ritMap);
+      LOG.debug("Failure Recovery, this.ritMap.className is {}, this.ritMap.size is {}", this.ritMap$dryrun.getClass().getName(), this.ritMap$dryrun.size());
+    }
+
+    if(this.regionInfo$dryrun == null){
+      this.regionInfo$dryrun = DryRunManager.clone(this.regionInfo);
+    }
+    ritMap$dryrun.put(regionInfo$dryrun, this);
+    return proc;
+  }
+
   public void unsetProcedure(TransitRegionStateProcedure proc) {
+    if(TraceUtil.isDryRun()){
+      LOG.info("Failure Recovery, unsetProcedure redirect to unsetProcedure$instrumentation");
+      unsetProcedure$instrumentation(proc);
+      return;
+    }
     assert this.procedure == proc;
     this.procedure = null;
     ritMap.remove(regionInfo, this);
   }
 
+  public void unsetProcedure$instrumentation(TransitRegionStateProcedure proc) {
+    if(procedure$dryrun == null){
+      procedure$dryrun = DryRunManager.clone(procedure);
+    }
+    assert this.procedure$dryrun == proc;
+    this.procedure$dryrun = null;
+    if(regionInfo$dryrun == null){
+      regionInfo$dryrun = DryRunManager.clone(regionInfo);
+    }
+    if(ritMap$dryrun == null){
+      ritMap$dryrun = DryRunManager.clone(ritMap);
+    }
+    ritMap$dryrun.remove(regionInfo$dryrun, this);
+  }
+
   public TransitRegionStateProcedure getProcedure() {
+    if(TraceUtil.isDryRun()){
+      return getProcedure$instrumentation();
+    }
     return procedure;
+  }
+
+  public TransitRegionStateProcedure getProcedure$instrumentation() {
+    if(procedure$dryrun == null){
+      procedure$dryrun = DryRunManager.clone(procedure);
+    }
+    return procedure$dryrun;
   }
 
   public ProcedureEvent<?> getProcedureEvent() {
@@ -225,7 +335,18 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
   }
 
   public RegionInfo getRegionInfo() {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, getRegionInfo redirect to getRegionInfo$instrumentation");
+      return getRegionInfo$instrumentation();
+    }
     return regionInfo;
+  }
+
+  public RegionInfo getRegionInfo$instrumentation() {
+    if(regionInfo$dryrun == null){
+      regionInfo$dryrun = DryRunManager.clone(regionInfo);
+    }
+    return regionInfo$dryrun;
   }
 
   public TableName getTable() {
@@ -241,7 +362,17 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
   }
 
   public ServerName getRegionLocation() {
+    if(TraceUtil.isDryRun() || isDryRun){
+      return getRegionLocation$instrumentation();
+    }
     return regionLocation;
+  }
+
+  public ServerName getRegionLocation$instrumentation() {
+    if(regionLocation$dryrun == null){
+      regionLocation$dryrun = DryRunManager.clone(regionLocation);
+    }
+    return regionLocation$dryrun;
   }
 
   public State getState() {

@@ -87,6 +87,7 @@ message OpenRegionRequest {
     required RegionInfo region = 1;
     optional uint32 version_of_offline_node = 2;
     repeated ServerName favored_nodes = 3;
+    optional bool is_dry_run = 4 [default = false];
     // open region for distributedLogReplay
     // optional bool DEPRECATED_openForDistributedLogReplay = 4;
     optional int64 open_proc_id = 5 [default = -1];

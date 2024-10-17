@@ -222,6 +222,7 @@ public abstract class RemoteProcedureDispatcher<TEnv, TRemote extends Comparable
    */
   public static abstract class RemoteOperation {
     private final RemoteProcedure remoteProcedure;
+    public boolean isDryRun = false;
 
     protected RemoteOperation(final RemoteProcedure remoteProcedure) {
       this.remoteProcedure = remoteProcedure;

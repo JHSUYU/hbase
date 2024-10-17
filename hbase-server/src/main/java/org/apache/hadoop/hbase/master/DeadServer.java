@@ -27,6 +27,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.apache.hadoop.hbase.ServerName;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -61,6 +63,8 @@ public class DeadServer {
    * and removed after it is done processing the crash.
    */
   private final Set<ServerName> processingServers = new HashSet<>();
+
+  private Set<ServerName> processingServers$dryrun = null;
 
   /**
    * @param serverName server name.
@@ -98,9 +102,23 @@ public class DeadServer {
    * @see #finish(ServerName)
    */
   public synchronized void processing(ServerName sn) {
+    if(TraceUtil.isDryRun()){
+      processing$instrumentation(sn);
+      return;
+    }
     if (processingServers.add(sn)) {
       // Only log on add.
       LOG.debug("Processing {}; numProcessing={}", sn, processingServers.size());
+    }
+  }
+
+  public synchronized void processing$instrumentation(ServerName sn) {
+    if(processingServers$dryrun == null){
+      processingServers$dryrun = DryRunManager.clone(processingServers);
+    }
+    if (processingServers$dryrun.add(sn)) {
+      // Only log on add.
+      LOG.debug("DryRun Processing {}; numProcessing={}", sn, processingServers$dryrun.size());
     }
   }
 

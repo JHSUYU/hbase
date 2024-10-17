@@ -142,6 +142,7 @@ import org.apache.hadoop.hbase.security.access.AccessChecker;
 import org.apache.hadoop.hbase.security.access.NoopAccessChecker;
 import org.apache.hadoop.hbase.security.access.Permission;
 import org.apache.hadoop.hbase.security.access.ZKPermissionWatcher;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.DNS;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
@@ -3875,6 +3876,11 @@ public class RSRpcServices
     Map<TableName, TableDescriptor> tdCache) {
     long masterSystemTime = request.hasMasterSystemTime() ? request.getMasterSystemTime() : -1;
     for (RegionOpenInfo regionOpenInfo : request.getOpenInfoList()) {
+      boolean isDryRun = regionOpenInfo.getIsDryRun();
+      if(isDryRun){
+        TraceUtil.createDryRunBaggage();
+      }
+      LOG.debug("Failure Recovery, executeOpenRegionProceduresisDryRun={}, regionOpenInfo={}", isDryRun, regionOpenInfo);
       RegionInfo regionInfo = ProtobufUtil.toRegionInfo(regionOpenInfo.getRegion());
       TableName tableName = regionInfo.getTable();
       TableDescriptor tableDesc = tdCache.get(tableName);

@@ -918,6 +918,13 @@ public class ProcedureExecutor<TEnvironment> {
    * @return the procedure id, that can be used to monitor the operation
    */
   public long submitProcedure(Procedure<TEnvironment> proc) {
+    if(TraceUtil.isDryRun()){
+      return submitProcedure$instrumentation(proc);
+    }
+    return submitProcedure(proc, null);
+  }
+
+  public long submitProcedure$instrumentation(Procedure<TEnvironment> proc) {
     return submitProcedure(proc, null);
   }
 
@@ -1076,6 +1083,35 @@ public class ProcedureExecutor<TEnvironment> {
   @edu.umd.cs.findbugs.annotations.SuppressWarnings(value = "NP_NULL_ON_SOME_PATH",
       justification = "FindBugs is blind to the check-for-null")
   public long submitProcedure(Procedure<TEnvironment> proc, NonceKey nonceKey) {
+    if(TraceUtil.isDryRun()){
+      return submitProcedure$instrumentation(proc, nonceKey);
+    }
+    Preconditions.checkArgument(lastProcId.get() >= 0);
+
+    prepareProcedure(proc);
+
+    final Long currentProcId;
+    if (nonceKey != null) {
+      currentProcId = nonceKeysToProcIdsMap.get(nonceKey);
+      Preconditions.checkArgument(currentProcId != null,
+        "Expected nonceKey=" + nonceKey + " to be reserved, use registerNonce(); proc=" + proc);
+    } else {
+      currentProcId = nextProcId();
+    }
+
+    // Initialize the procedure
+    proc.setNonceKey(nonceKey);
+    proc.setProcId(currentProcId.longValue());
+
+    // Commit the transaction
+    store.insert(proc, null);
+    LOG.debug("Stored {}", proc);
+
+    // Add the procedure to the executor
+    return pushProcedure(proc);
+  }
+
+  public long submitProcedure$instrumentation(Procedure<TEnvironment> proc, NonceKey nonceKey) {
     Preconditions.checkArgument(lastProcId.get() >= 0);
 
     prepareProcedure(proc);

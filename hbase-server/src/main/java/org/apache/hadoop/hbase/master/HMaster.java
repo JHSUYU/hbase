@@ -108,6 +108,7 @@ import org.apache.hadoop.hbase.client.TableDescriptorBuilder;
 import org.apache.hadoop.hbase.client.TableState;
 import org.apache.hadoop.hbase.conf.ConfigurationManager;
 import org.apache.hadoop.hbase.coprocessor.CoprocessorHost;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.exceptions.MasterStoppedException;
 import org.apache.hadoop.hbase.executor.ExecutorType;
 import org.apache.hadoop.hbase.favored.FavoredNodesManager;
@@ -332,8 +333,12 @@ public class HMaster extends HRegionServer implements MasterServices {
   // server manager to deal with region server info
   private volatile ServerManager serverManager;
 
+  private volatile ServerManager serverManager$dryrun;
+
   // manager of assignment nodes in zookeeper
   private AssignmentManager assignmentManager;
+
+  private AssignmentManager assignmentManager$dryrun;
 
   // manager of replication
   private ReplicationPeerManager replicationPeerManager;
@@ -1504,7 +1509,17 @@ public class HMaster extends HRegionServer implements MasterServices {
 
   @Override
   public ServerManager getServerManager() {
+    if(TraceUtil.isDryRun()){
+      return getServerManager$instrumentation();
+    }
     return this.serverManager;
+  }
+
+  public ServerManager getServerManager$instrumentation() {
+    if(this.serverManager$dryrun == null){
+      this.serverManager$dryrun = DryRunManager.clone(this.serverManager);
+    }
+    return this.serverManager$dryrun;
   }
 
   @Override
@@ -3130,8 +3145,20 @@ public class HMaster extends HRegionServer implements MasterServices {
 
   @Override
   public AssignmentManager getAssignmentManager() {
+    if(TraceUtil.isDryRun()){
+      return getAssignmentManager$instrumentation();
+    }
     return this.assignmentManager;
   }
+
+  public AssignmentManager getAssignmentManager$instrumentation() {
+    if(this.assignmentManager$dryrun == null){
+      this.assignmentManager$dryrun = DryRunManager.clone(this.assignmentManager);
+    }
+    return this.assignmentManager$dryrun;
+  }
+
+
 
   @Override
   public CatalogJanitor getCatalogJanitor() {

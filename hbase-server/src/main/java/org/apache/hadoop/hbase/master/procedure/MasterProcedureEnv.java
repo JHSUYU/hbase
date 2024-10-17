@@ -22,6 +22,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.conf.ConfigurationObserver;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.ipc.RpcServer;
 import org.apache.hadoop.hbase.master.MasterCoprocessorHost;
 import org.apache.hadoop.hbase.master.MasterFileSystem;
@@ -31,8 +32,10 @@ import org.apache.hadoop.hbase.master.replication.ReplicationPeerManager;
 import org.apache.hadoop.hbase.procedure2.Procedure;
 import org.apache.hadoop.hbase.procedure2.ProcedureEvent;
 import org.apache.hadoop.hbase.procedure2.store.LeaseRecovery;
+import org.apache.hadoop.hbase.protobuf.generated.ZooKeeperProtos;
 import org.apache.hadoop.hbase.security.Superusers;
 import org.apache.hadoop.hbase.security.User;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.CancelableProgressable;
 import org.apache.hadoop.hbase.util.RecoverLeaseFSUtils;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -73,6 +76,7 @@ public class MasterProcedureEnv implements ConfigurationObserver {
   private final RSProcedureDispatcher remoteDispatcher;
   private final MasterProcedureScheduler procSched;
   private final MasterServices master;
+  public MasterServices master$dryrun=null;
 
   public MasterProcedureEnv(final MasterServices master) {
     this(master, new RSProcedureDispatcher(master));
@@ -91,7 +95,17 @@ public class MasterProcedureEnv implements ConfigurationObserver {
   }
 
   public MasterServices getMasterServices() {
+    if(TraceUtil.isDryRun()){
+      return getMasterServices$instrumentation();
+    }
     return master;
+  }
+
+  public MasterServices getMasterServices$instrumentation() {
+    if(master$dryrun==null){
+      master$dryrun=DryRunManager.clone(master);
+    }
+    return master$dryrun;
   }
 
   public Configuration getMasterConfiguration() {
@@ -99,7 +113,17 @@ public class MasterProcedureEnv implements ConfigurationObserver {
   }
 
   public AssignmentManager getAssignmentManager() {
+    if(TraceUtil.isDryRun()){
+      return getAssignmentManager$instrumentation();
+    }
     return master.getAssignmentManager();
+  }
+
+  public AssignmentManager getAssignmentManager$instrumentation() {
+    if(master$dryrun == null){
+      master$dryrun=DryRunManager.clone(master);
+    }
+    return master$dryrun.getAssignmentManager();
   }
 
   public MasterCoprocessorHost getMasterCoprocessorHost() {

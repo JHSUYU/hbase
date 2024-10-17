@@ -51,6 +51,12 @@ public class OpenRegionProcedure extends RegionRemoteProcedureBase {
     super(parent, region, targetServer);
   }
 
+  public OpenRegionProcedure(TransitRegionStateProcedure parent, RegionInfo region,
+    ServerName targetServer, boolean isDryRun) {
+    super(parent, region, targetServer);
+    this.isDryRun = isDryRun;
+  }
+
   @Override
   public TableOperationType getTableOperationType() {
     return TableOperationType.REGION_ASSIGN;
@@ -58,6 +64,9 @@ public class OpenRegionProcedure extends RegionRemoteProcedureBase {
 
   @Override
   public RemoteOperation newRemoteOperation() {
+    if(isDryRun){
+      return new RegionOpenOperation(this, region, getProcId(), isDryRun);
+    }
     return new RegionOpenOperation(this, region, getProcId());
   }
 

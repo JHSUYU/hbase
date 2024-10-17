@@ -286,6 +286,7 @@ public abstract class RegionRemoteProcedureBase extends Procedure<MasterProcedur
   protected Procedure<MasterProcedureEnv>[] execute(MasterProcedureEnv env)
     throws ProcedureYieldException, ProcedureSuspendedException, InterruptedException {
     RegionStateNode regionNode = getRegionNode(env);
+    LOG.debug("Failure Recovery, regionNode={}, state={}", regionNode, state);
     regionNode.lock();
     try {
       switch (state) {

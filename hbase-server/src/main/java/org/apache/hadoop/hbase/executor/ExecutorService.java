@@ -31,6 +31,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import io.opentelemetry.context.Context;
 import org.apache.hadoop.hbase.monitoring.ThreadMonitoring;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -262,7 +263,7 @@ public class ExecutorService {
     void submit(final EventHandler event) {
       // If there is a listener for this type, make sure we call the before
       // and after process methods.
-      this.threadPoolExecutor.execute(event);
+      this.threadPoolExecutor.execute(Context.current().wrap(event));
     }
 
     TrackingThreadPoolExecutor getThreadPoolExecutor() {

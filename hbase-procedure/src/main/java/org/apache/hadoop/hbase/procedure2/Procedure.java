@@ -113,6 +113,7 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure<TE
   private static final Logger LOG = LoggerFactory.getLogger(Procedure.class);
   public static final long NO_PROC_ID = -1;
   protected static final int NO_TIMEOUT = -1;
+  public boolean isDryRun = false;
 
   public enum LockState {
     LOCK_ACQUIRED, // Lock acquired and ready to execute

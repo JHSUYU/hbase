@@ -200,6 +200,8 @@ public class RegionStateStore {
       .setTimestamp(put.getTimestamp()).setType(Cell.Type.Put).setValue(Bytes.toBytes(state.name()))
       .build());
     LOG.info(info.toString());
+    Exception e= new IOException();
+    e.printStackTrace();
     updateRegionLocation(regionInfo, state, put);
     if (regionInfo.isMetaRegion() && regionInfo.isFirst()) {
       // mirror the meta location to zookeeper

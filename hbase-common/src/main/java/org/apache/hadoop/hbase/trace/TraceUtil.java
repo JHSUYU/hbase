@@ -18,13 +18,18 @@
 package org.apache.hadoop.hbase.trace;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.baggage.Baggage;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
+import io.opentelemetry.context.ContextKey;
 import io.opentelemetry.context.Scope;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -34,8 +39,38 @@ import org.apache.yetus.audience.InterfaceAudience;
 
 @InterfaceAudience.Private
 public final class TraceUtil {
+  public static boolean debug = false;
+
+  public static final String DRY_RUN_KEY= "is_dry_run";
+
+  public static ContextKey<Boolean> IS_DRY_RUN = ContextKey.named(DRY_RUN_KEY);
+
+  private static Set<Integer> dryRunSet = Collections.synchronizedSet(new HashSet<>());
+
+  public static void addToDryRunSet(Object obj){
+    dryRunSet.add(System.identityHashCode(obj));
+  }
+
+  public static boolean isInDryRunSet(Object obj){
+    return dryRunSet.contains(System.identityHashCode(obj));
+  }
 
   private TraceUtil() {
+  }
+
+  public static Span createDryRunSpan(String name) {
+    return createDryRunSpan(name, SpanKind.INTERNAL);
+  }
+
+  public static Span createDryRunSpan(String name, SpanKind kind) {
+    return getGlobalTracer().spanBuilder(name).setSpanKind(kind).setNoParent().startSpan();
+  }
+
+  public static Baggage createDryRunBaggage() {
+    Baggage dryRunBaggage = Baggage.current().toBuilder().put(DRY_RUN_KEY, "true").build();
+    dryRunBaggage.makeCurrent();
+    Context.current().with(dryRunBaggage).makeCurrent();
+    return dryRunBaggage;
   }
 
   public static Tracer getGlobalTracer() {
@@ -107,7 +142,7 @@ public final class TraceUtil {
    * {@code futures} are completed.
    */
   public static <T> List<CompletableFuture<T>>
-    tracedFutures(Supplier<List<CompletableFuture<T>>> action, Supplier<Span> spanSupplier) {
+  tracedFutures(Supplier<List<CompletableFuture<T>>> action, Supplier<Span> spanSupplier) {
     Span span = spanSupplier.get();
     try (Scope ignored = span.makeCurrent()) {
       List<CompletableFuture<T>> futures = action.get();
@@ -222,5 +257,14 @@ public final class TraceUtil {
     } finally {
       span.end();
     }
+  }
+
+  public static boolean isDryRun() {
+    if(debug){
+      return false;
+    }else{
+      return Baggage.current().getEntryValue(DRY_RUN_KEY) != null && Boolean.parseBoolean(Baggage.current().getEntryValue(DRY_RUN_KEY));
+    }
+    //return false;
   }
 }

@@ -55,6 +55,7 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.TableState;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.exceptions.UnexpectedStateException;
 import org.apache.hadoop.hbase.favored.FavoredNodesManager;
 import org.apache.hadoop.hbase.favored.FavoredNodesPromoter;
@@ -79,6 +80,7 @@ import org.apache.hadoop.hbase.procedure2.ProcedureExecutor;
 import org.apache.hadoop.hbase.procedure2.ProcedureInMemoryChore;
 import org.apache.hadoop.hbase.procedure2.util.StringUtils;
 import org.apache.hadoop.hbase.regionserver.SequenceId;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Pair;
@@ -164,6 +166,7 @@ public class AssignmentManager {
 
   private final AtomicBoolean running = new AtomicBoolean(false);
   private final RegionStates regionStates = new RegionStates();
+  private RegionStates regionStates$dryrun = null;
   private final RegionStateStore regionStateStore;
 
   /**
@@ -411,7 +414,18 @@ public class AssignmentManager {
   }
 
   public RegionStates getRegionStates() {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to getRegionStates$instrumentation");
+      return getRegionStates$instrumentation();
+    }
     return regionStates;
+  }
+
+  public RegionStates getRegionStates$instrumentation(){
+    if(regionStates$dryrun == null){
+      regionStates$dryrun = DryRunManager.clone(regionStates);
+    }
+    return regionStates$dryrun;
   }
 
   /**
@@ -1853,6 +1867,10 @@ public class AssignmentManager {
    * @return pid of scheduled SCP or {@link Procedure#NO_PROC_ID} if none scheduled.
    */
   public long submitServerCrash(ServerName serverName, boolean shouldSplitWal, boolean force) {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to submitServerCrash$instrumentation");
+      return submitServerCrash$instrumentation(serverName, shouldSplitWal, force);
+    }
     // May be an 'Unknown Server' so handle case where serverNode is null.
     ServerStateNode serverNode = regionStates.getServerNode(serverName);
     // Remove the in-memory rsReports result
@@ -1894,6 +1912,61 @@ public class AssignmentManager {
         } else {
           pid = procExec.submitProcedure(
             new ServerCrashProcedure(mpe, serverName, shouldSplitWal, carryingMeta));
+        }
+        LOG.info("Scheduled ServerCrashProcedure pid={} for {} (carryingMeta={}){}.", pid,
+          serverName, carryingMeta,
+          serverNode == null ? "" : " " + serverNode.toString() + ", oldState=" + oldState);
+      }
+    } finally {
+      if (serverNode != null) {
+        serverNode.writeLock().unlock();
+      }
+    }
+    return pid;
+  }
+
+  public long submitServerCrash$instrumentation(ServerName serverName, boolean shouldSplitWal, boolean force) {
+    // May be an 'Unknown Server' so handle case where serverNode is null.
+    ServerStateNode serverNode = regionStates.getServerNode(serverName);
+    // Remove the in-memory rsReports result
+    synchronized (rsReports) {
+      rsReports.remove(serverName);
+    }
+
+    // We hold the write lock here for fencing on reportRegionStateTransition. Once we set the
+    // server state to CRASHED, we will no longer accept the reportRegionStateTransition call from
+    // this server. This is used to simplify the implementation for TRSP and SCP, where we can make
+    // sure that, the region list fetched by SCP will not be changed any more.
+    if (serverNode != null) {
+      serverNode.writeLock().lock();
+    }
+    boolean carryingMeta;
+    long pid;
+    try {
+      ProcedureExecutor<MasterProcedureEnv> procExec = this.master.getMasterProcedureExecutor();
+      carryingMeta = isCarryingMeta(serverName);
+      if (!force && serverNode != null && !serverNode.isInState(ServerState.ONLINE)) {
+        LOG.info("Skip adding ServerCrashProcedure for {} (meta={}) -- running?", serverNode,
+          carryingMeta);
+        return Procedure.NO_PROC_ID;
+      } else {
+        MasterProcedureEnv mpe = procExec.getEnvironment();
+        // If serverNode == null, then 'Unknown Server'. Schedule HBCKSCP instead.
+        // HBCKSCP scours Master in-memory state AND hbase;meta for references to
+        // serverName just-in-case. An SCP that is scheduled when the server is
+        // 'Unknown' probably originated externally with HBCK2 fix-it tool.
+        ServerState oldState = null;
+        if (serverNode != null) {
+          oldState = serverNode.getState();
+          serverNode.setState(ServerState.CRASHED);
+        }
+
+        if (force) {
+          pid = procExec.submitProcedure(
+            new HBCKServerCrashProcedure(mpe, serverName, shouldSplitWal, carryingMeta));
+        } else {
+          pid = procExec.submitProcedure(
+            new ServerCrashProcedure(mpe, serverName, shouldSplitWal, carryingMeta, TraceUtil.isDryRun()));
         }
         LOG.info("Scheduled ServerCrashProcedure pid={} for {} (carryingMeta={}){}.", pid,
           serverName, carryingMeta,
@@ -2011,6 +2084,26 @@ public class AssignmentManager {
   // ============================================================================================
   private void transitStateAndUpdate(RegionStateNode regionNode, RegionState.State newState,
     RegionState.State... expectedStates) throws IOException {
+    if(TraceUtil.isDryRun()){
+      transitStateAndUpdate$instrumentation(regionNode, newState, expectedStates);
+      return;
+    }
+    RegionState.State state = regionNode.getState();
+    regionNode.transitionState(newState, expectedStates);
+    boolean succ = false;
+    try {
+      regionStateStore.updateRegionLocation(regionNode);
+      succ = true;
+    } finally {
+      if (!succ) {
+        // revert
+        regionNode.setState(state);
+      }
+    }
+  }
+
+  private void transitStateAndUpdate$instrumentation(RegionStateNode regionNode, RegionState.State newState,
+    RegionState.State... expectedStates) throws IOException {
     RegionState.State state = regionNode.getState();
     regionNode.transitionState(newState, expectedStates);
     boolean succ = false;
@@ -2027,6 +2120,20 @@ public class AssignmentManager {
 
   // should be called within the synchronized block of RegionStateNode
   void regionOpening(RegionStateNode regionNode) throws IOException {
+    // As in SCP, for performance reason, there is no TRSP attached with this region, we will not
+    // update the region state, which means that the region could be in any state when we want to
+    // assign it after a RS crash. So here we do not pass the expectedStates parameter.
+    if(TraceUtil.isDryRun()){
+      regionOpening$instrumentation(regionNode);
+      return;
+    }
+    transitStateAndUpdate(regionNode, State.OPENING);
+    regionStates.addRegionToServer(regionNode);
+    // update the operation count metrics
+    metrics.incrementOperationCounter();
+  }
+
+  void regionOpening$instrumentation(RegionStateNode regionNode) throws IOException {
     // As in SCP, for performance reason, there is no TRSP attached with this region, we will not
     // update the region state, which means that the region could be in any state when we want to
     // assign it after a RS crash. So here we do not pass the expectedStates parameter.
@@ -2125,6 +2232,7 @@ public class AssignmentManager {
   }
 
   void persistToMeta(RegionStateNode regionNode) throws IOException {
+    LOG.debug("Not Failure Recovery, regionNode is {}", regionNode);
     regionStateStore.updateRegionLocation(regionNode);
     RegionInfo regionInfo = regionNode.getRegionInfo();
     if (isMetaRegion(regionInfo) && regionNode.getState() == State.OPEN) {

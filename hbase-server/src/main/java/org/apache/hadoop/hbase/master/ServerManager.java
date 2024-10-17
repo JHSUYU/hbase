@@ -44,12 +44,14 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.YouAreDeadException;
 import org.apache.hadoop.hbase.client.ClusterConnection;
 import org.apache.hadoop.hbase.client.RegionInfo;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.ipc.HBaseRpcController;
 import org.apache.hadoop.hbase.ipc.RemoteWithExtrasException;
 import org.apache.hadoop.hbase.ipc.RpcControllerFactory;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.procedure2.Procedure;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
@@ -131,6 +133,8 @@ public class ServerManager {
   private final RegionServerList storage;
 
   private final DeadServer deadservers = new DeadServer();
+
+  private  DeadServer deadservers$dryrun = null;
 
   private final long maxSkew;
   private final long warningSkew;
@@ -460,7 +464,18 @@ public class ServerManager {
   }
 
   public DeadServer getDeadServers() {
+    if(TraceUtil.isDryRun()){
+      LOG.info("Failure Recovery, getDeadServers() redirect to getDeadServers$instrumentation");
+      return getDeadServers$instrumentation();
+    }
     return this.deadservers;
+  }
+
+  public DeadServer getDeadServers$instrumentation() {
+    if(this.deadservers$dryrun == null){
+      this.deadservers$dryrun = DryRunManager.clone(this.deadservers);
+    }
+    return this.deadservers$dryrun;
   }
 
   /**
@@ -535,11 +550,71 @@ public class ServerManager {
    */
   // Redo test so we can make this protected.
   public synchronized long expireServer(final ServerName serverName) {
+    if(TraceUtil.isDryRun()){
+      LOG.info("Failure Recovery,expireServer(final ServerName serverName) redirect to expireServer$instrumentation");
+      return expireServer$instrumentation(serverName);
+    }
+    return expireServer(serverName, false);
+
+  }
+
+  public synchronized long expireServer$instrumentation(final ServerName serverName) {
     return expireServer(serverName, false);
 
   }
 
   synchronized long expireServer(final ServerName serverName, boolean force) {
+    // THIS server is going down... can't handle our own expiration.
+    if(TraceUtil.isDryRun()){
+      LOG.info("Failure Recovery,expireServer(final ServerName serverName, boolean force) redirect to expireServer$instrumentation");
+      return expireServer$instumentation(serverName, force);
+    }
+    if (serverName.equals(master.getServerName())) {
+      if (!(master.isAborted() || master.isStopped())) {
+        master.stop("We lost our znode?");
+      }
+      return Procedure.NO_PROC_ID;
+    }
+    if (this.deadservers.isDeadServer(serverName)) {
+      LOG.warn("Expiration called on {} but already in DeadServer", serverName);
+      return Procedure.NO_PROC_ID;
+    }
+    moveFromOnlineToDeadServers(serverName);
+
+    // If server is in draining mode, remove corresponding znode
+    // In some tests, the mocked HM may not have ZK Instance, hence null check
+    if (master.getZooKeeper() != null) {
+      String drainingZnode = ZNodePaths
+        .joinZNode(master.getZooKeeper().getZNodePaths().drainingZNode, serverName.getServerName());
+      try {
+        ZKUtil.deleteNodeFailSilent(master.getZooKeeper(), drainingZnode);
+      } catch (KeeperException e) {
+        LOG.warn(
+          "Error deleting the draining znode for stopping server " + serverName.getServerName(), e);
+      }
+    }
+
+    // If cluster is going down, yes, servers are going to be expiring; don't
+    // process as a dead server
+    if (isClusterShutdown()) {
+      LOG.info("Cluster shutdown set; " + serverName + " expired; onlineServers="
+        + this.onlineServers.size());
+      if (this.onlineServers.isEmpty()) {
+        master.stop("Cluster shutdown set; onlineServer=0");
+      }
+      return Procedure.NO_PROC_ID;
+    }
+    LOG.info("Processing expiration of " + serverName + " on " + this.master.getServerName());
+    long pid = master.getAssignmentManager().submitServerCrash(serverName, true, force);
+    storage.expired(serverName);
+    // Tell our listeners that a server was removed
+    if (!this.listeners.isEmpty()) {
+      this.listeners.stream().forEach(l -> l.serverRemoved(serverName));
+    }
+    return pid;
+  }
+
+  synchronized long expireServer$instumentation(final ServerName serverName, boolean force) {
     // THIS server is going down... can't handle our own expiration.
     if (serverName.equals(master.getServerName())) {
       if (!(master.isAborted() || master.isStopped())) {
@@ -591,6 +666,29 @@ public class ServerManager {
    */
   // Locking in this class needs cleanup.
   public synchronized void moveFromOnlineToDeadServers(final ServerName sn) {
+    if(TraceUtil.isDryRun()){
+      moveFromOnlineToDeadServers$instrumentation(sn);
+      return;
+    }
+    synchronized (this.onlineServers) {
+      boolean online = this.onlineServers.containsKey(sn);
+      if (online) {
+        // Remove the server from the known servers lists and update load info BUT
+        // add to deadservers first; do this so it'll show in dead servers list if
+        // not in online servers list.
+        this.deadservers.putIfAbsent(sn);
+        this.onlineServers.remove(sn);
+        onlineServers.notifyAll();
+      } else {
+        // If not online, that is odd but may happen if 'Unknown Servers' -- where meta
+        // has references to servers not online nor in dead servers list. If
+        // 'Unknown Server', don't add to DeadServers else will be there for ever.
+        LOG.trace("Expiration of {} but server not online", sn);
+      }
+    }
+  }
+
+  public synchronized void moveFromOnlineToDeadServers$instrumentation(final ServerName sn) {
     synchronized (this.onlineServers) {
       boolean online = this.onlineServers.containsKey(sn);
       if (online) {

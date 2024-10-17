@@ -397,6 +397,7 @@ public class RSProcedureDispatcher extends RemoteProcedureDispatcher<MasterProce
       if (LOG.isTraceEnabled()) {
         LOG.trace("Building request with operations count=" + remoteProcedures.size());
       }
+      LOG.debug("Failure Recovery, building request with operations count=" + remoteProcedures.size());
       splitAndResolveOperation(getServerName(), remoteProcedures, this);
 
       try {
@@ -504,10 +505,16 @@ public class RSProcedureDispatcher extends RemoteProcedureDispatcher<MasterProce
       super(remoteProcedure, regionInfo, procId);
     }
 
+    public RegionOpenOperation(RemoteProcedure remoteProcedure, RegionInfo regionInfo,
+      long procId, boolean isDryRun) {
+      super(remoteProcedure, regionInfo, procId);
+      this.isDryRun = isDryRun;
+    }
+
     public OpenRegionRequest.RegionOpenInfo
       buildRegionOpenInfoRequest(final MasterProcedureEnv env) {
       return RequestConverter.buildRegionOpenInfo(regionInfo,
-        env.getAssignmentManager().getFavoredNodes(regionInfo), procId);
+        env.getAssignmentManager().getFavoredNodes(regionInfo), procId, this.isDryRun);
     }
   }
 

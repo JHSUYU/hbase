@@ -38,6 +38,7 @@ import org.apache.hadoop.hbase.procedure2.ProcedureStateSerializer;
 import org.apache.hadoop.hbase.procedure2.ProcedureSuspendedException;
 import org.apache.hadoop.hbase.procedure2.ProcedureUtil;
 import org.apache.hadoop.hbase.procedure2.ProcedureYieldException;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.RetryCounter;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -102,6 +103,7 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.RegionServerStatusProto
 @InterfaceAudience.Private
 public class TransitRegionStateProcedure
   extends AbstractStateMachineRegionProcedure<RegionStateTransitionState> {
+  public boolean isDryRun = false;
 
   private static final Logger LOG = LoggerFactory.getLogger(TransitRegionStateProcedure.class);
 
@@ -176,12 +178,19 @@ public class TransitRegionStateProcedure
 
   private void queueAssign(MasterProcedureEnv env, RegionStateNode regionNode)
     throws ProcedureSuspendedException {
+    if(TraceUtil.isDryRun()){
+      queueAssign$instrumentation(env, regionNode);
+      return;
+    }
     boolean retain = false;
     if (forceNewPlan) {
       // set the region location to null if forceNewPlan is true
+      LOG.debug("Not Failure Recovery, forceNewPlan is true, set region location to null");
       regionNode.setRegionLocation(null);
     } else {
       if (assignCandidate != null) {
+        LOG.debug("Not Failure Recovery, assignCandidate is not null, set region location to {}",
+          assignCandidate);
         retain = assignCandidate.equals(regionNode.getLastHost());
         regionNode.setRegionLocation(assignCandidate);
       } else if (regionNode.getLastHost() != null) {
@@ -192,6 +201,37 @@ public class TransitRegionStateProcedure
     }
     LOG.info("Starting {}; {}; forceNewPlan={}, retain={}", this, regionNode.toShortString(),
       forceNewPlan, retain);
+    //TODO discuss
+    env.getAssignmentManager().queueAssign(regionNode);
+    setNextState(RegionStateTransitionState.REGION_STATE_TRANSITION_OPEN);
+    if (regionNode.getProcedureEvent().suspendIfNotReady(this)) {
+      throw new ProcedureSuspendedException();
+    }
+  }
+
+  private void queueAssign$instrumentation(MasterProcedureEnv env, RegionStateNode regionNode)
+    throws ProcedureSuspendedException {
+    boolean retain = false;
+    if (forceNewPlan) {
+      // set the region location to null if forceNewPlan is true
+      LOG.debug("Not Failure Recovery, forceNewPlan is true, set region location to null");
+      regionNode.setRegionLocation(null);
+    } else {
+      if (assignCandidate != null) {
+        LOG.debug("Not Failure Recovery, assignCandidate is not null, set region location to {}",
+          assignCandidate);
+        retain = assignCandidate.equals(regionNode.getLastHost());
+        regionNode.setRegionLocation(assignCandidate);
+      } else if (regionNode.getLastHost() != null) {
+        retain = true;
+        LOG.info("Setting lastHost as the region location {}", regionNode.getLastHost());
+        regionNode.setRegionLocation(regionNode.getLastHost());
+      }
+    }
+    LOG.info("Starting {}; {}; forceNewPlan={}, retain={}", this, regionNode.toShortString(),
+      forceNewPlan, retain);
+    //TODO discuss
+    regionNode.isDryRun = true;
     env.getAssignmentManager().queueAssign(regionNode);
     setNextState(RegionStateTransitionState.REGION_STATE_TRANSITION_OPEN);
     if (regionNode.getProcedureEvent().suspendIfNotReady(this)) {
@@ -200,6 +240,10 @@ public class TransitRegionStateProcedure
   }
 
   private void openRegion(MasterProcedureEnv env, RegionStateNode regionNode) throws IOException {
+    if(TraceUtil.isDryRun()){
+      openRegion$instrumentation(env, regionNode);
+      return;
+    }
     ServerName loc = regionNode.getRegionLocation();
     if (loc == null || BOGUS_SERVER_NAME.equals(loc)) {
       LOG.warn("No location specified for {}, jump back to state {} to get one", getRegion(),
@@ -212,8 +256,26 @@ public class TransitRegionStateProcedure
     setNextState(RegionStateTransitionState.REGION_STATE_TRANSITION_CONFIRM_OPENED);
   }
 
+  private void openRegion$instrumentation(MasterProcedureEnv env, RegionStateNode regionNode) throws IOException {
+    ServerName loc = regionNode.getRegionLocation();
+    if (loc == null || BOGUS_SERVER_NAME.equals(loc)) {
+      LOG.warn("No location specified for {}, jump back to state {} to get one", getRegion(),
+        RegionStateTransitionState.REGION_STATE_TRANSITION_GET_ASSIGN_CANDIDATE);
+      setNextState(RegionStateTransitionState.REGION_STATE_TRANSITION_GET_ASSIGN_CANDIDATE);
+      throw new HBaseIOException("Failed to open region, the location is null or bogus.");
+    }
+    env.getAssignmentManager().regionOpening(regionNode);
+    addChildProcedure(new OpenRegionProcedure(this, getRegion(), loc, true));
+    LOG.debug("Failure Recovery, reach setNextState {}", regionNode);
+    setNextState(RegionStateTransitionState.REGION_STATE_TRANSITION_CONFIRM_OPENED);
+  }
+
   private Flow confirmOpened(MasterProcedureEnv env, RegionStateNode regionNode)
     throws IOException {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to confirmOpened$instrumentation");
+      return confirmOpened$instrumentation(env, regionNode);
+    }
     if (regionNode.isInState(State.OPEN)) {
       retryCounter = null;
       if (lastState == RegionStateTransitionState.REGION_STATE_TRANSITION_CONFIRM_OPENED) {
@@ -230,7 +292,56 @@ public class TransitRegionStateProcedure
       setNextState(RegionStateTransitionState.REGION_STATE_TRANSITION_CLOSE);
       return Flow.HAS_MORE_STATE;
     }
+    LOG.debug("Failure Recovery, regionNode in confirmOpened needs retry: {}", regionNode);
+    int retries = env.getAssignmentManager().getRegionStates().addToFailedOpen(regionNode)
+      .incrementAndGetRetries();
+    int maxAttempts = env.getAssignmentManager().getAssignMaxAttempts();
+    LOG.info("Retry={} of max={}; {}; {}", retries, maxAttempts, this, regionNode.toShortString());
 
+    if (retries >= maxAttempts) {
+      env.getAssignmentManager().regionFailedOpen(regionNode, true);
+      setFailure(getClass().getSimpleName(), new RetriesExhaustedException(
+        "Max attempts " + env.getAssignmentManager().getAssignMaxAttempts() + " exceeded"));
+      regionNode.unsetProcedure(this);
+      return Flow.NO_MORE_STATE;
+    }
+
+    env.getAssignmentManager().regionFailedOpen(regionNode, false);
+    // we failed to assign the region, force a new plan
+    forceNewPlan = true;
+    regionNode.setRegionLocation(null);
+    setNextState(RegionStateTransitionState.REGION_STATE_TRANSITION_GET_ASSIGN_CANDIDATE);
+
+    if (retries > env.getAssignmentManager().getAssignRetryImmediatelyMaxAttempts()) {
+      // Throw exception to backoff and retry when failed open too many times
+      throw new HBaseIOException(
+        "Failed confirm OPEN of " + regionNode + " (remote log may yield more detail on why).");
+    } else {
+      // Here we do not throw exception because we want to the region to be online ASAP
+      return Flow.HAS_MORE_STATE;
+    }
+  }
+
+  private Flow confirmOpened$instrumentation(MasterProcedureEnv env, RegionStateNode regionNode)
+    throws IOException {
+    if (regionNode.isInState(State.OPEN)) {
+      retryCounter = null;
+      LOG.debug("Failure Recovery, confirmOpened$instrumentation lastState is {}", lastState);
+      if (lastState == RegionStateTransitionState.REGION_STATE_TRANSITION_CONFIRM_OPENED) {
+        // we are the last state, finish
+        regionNode.unsetProcedure(this);
+        ServerCrashProcedure.updateProgress(env, getParentProcId());
+        return Flow.NO_MORE_STATE;
+      }
+      // It is possible that we arrive here but confirm opened is not the last state, for example,
+      // when merging or splitting a region, we unassign the region from a RS and the RS is crashed,
+      // then there will be recovered edits for this region, we'd better make the region online
+      // again and then unassign it, otherwise we have to fail the merge/split procedure as we may
+      // loss data.
+      setNextState(RegionStateTransitionState.REGION_STATE_TRANSITION_CLOSE);
+      return Flow.HAS_MORE_STATE;
+    }
+    LOG.debug("Failure Recovery, regionNode in confirmOpened needs retry: {}", regionNode);
     int retries = env.getAssignmentManager().getRegionStates().addToFailedOpen(regionNode)
       .incrementAndGetRetries();
     int maxAttempts = env.getAssignmentManager().getAssignMaxAttempts();
@@ -335,6 +446,11 @@ public class TransitRegionStateProcedure
   @Override
   protected Flow executeFromState(MasterProcedureEnv env, RegionStateTransitionState state)
     throws ProcedureSuspendedException, ProcedureYieldException, InterruptedException {
+    if(isDryRun) {
+      TraceUtil.createDryRunBaggage();
+      return executeFromState$instrumentation(env, state);
+    }
+    LOG.debug("Not Failure Recovery, TransitRegionStateProcedure executeFromState: {}", state);
     RegionStateNode regionNode = getRegionStateNode(env);
     try {
       switch (state) {
@@ -342,6 +458,66 @@ public class TransitRegionStateProcedure
           // Need to do some sanity check for replica region, if the region does not exist at
           // master, do not try to assign the replica region, log error and return.
           if (!RegionReplicaUtil.isDefaultReplica(regionNode.getRegionInfo())) {
+            LOG.debug("Not Failure Recovery, entering REGION_STATE_TRANSITION_GET_ASSIGN_CANDIDATE");
+            RegionInfo defaultRI =
+              RegionReplicaUtil.getRegionInfoForDefaultReplica(regionNode.getRegionInfo());
+            if (
+              env.getMasterServices().getAssignmentManager().getRegionStates()
+                .getRegionStateNode(defaultRI) == null
+            ) {
+              LOG.error(
+                "Cannot assign replica region {} because its primary region {} does not exist.",
+                regionNode.getRegionInfo(), defaultRI);
+              regionNode.unsetProcedure(this);
+              return Flow.NO_MORE_STATE;
+            }
+          }
+          LOG.debug("Not Failure Recovery, regionNode in REGION_STATE_TRANSITION_GET_ASSIGN_CANDIDATE: {}", regionNode);
+          queueAssign(env, regionNode);
+          return Flow.HAS_MORE_STATE;
+        case REGION_STATE_TRANSITION_OPEN:
+          LOG.debug("Not Failure Recovery, regionNode in REGION_STATE_TRANSITION_OPEN1: {}", regionNode);
+          openRegion(env, regionNode);
+          LOG.debug("Not Failure Recovery, regionNode in REGION_STATE_TRANSITION_OPEN2: {}", regionNode);
+          return Flow.HAS_MORE_STATE;
+        case REGION_STATE_TRANSITION_CONFIRM_OPENED:
+          LOG.debug("Not Failure Recovery, regionNode in REGION_STATE_TRANSITION_CONFIRMED_OPEN: {}", regionNode);
+          return confirmOpened(env, regionNode);
+        case REGION_STATE_TRANSITION_CLOSE:
+          closeRegion(env, regionNode);
+          return Flow.HAS_MORE_STATE;
+        case REGION_STATE_TRANSITION_CONFIRM_CLOSED:
+          return confirmClosed(env, regionNode);
+        default:
+          throw new UnsupportedOperationException("unhandled state=" + state);
+      }
+    } catch (IOException e) {
+      if (retryCounter == null) {
+        retryCounter = ProcedureUtil.createRetryCounter(env.getMasterConfiguration());
+      }
+      long backoff = retryCounter.getBackoffTimeAndIncrementAttempts();
+      LOG.warn(
+        "Failed transition, suspend {}secs {}; {}; waiting on rectified condition fixed "
+          + "by other Procedure or operator intervention",
+        backoff / 1000, this, regionNode.toShortString(), e);
+      setTimeout(Math.toIntExact(backoff));
+      setState(ProcedureProtos.ProcedureState.WAITING_TIMEOUT);
+      skipPersistence();
+      throw new ProcedureSuspendedException();
+    }
+  }
+
+  protected Flow executeFromState$instrumentation(MasterProcedureEnv env, RegionStateTransitionState state)
+    throws ProcedureSuspendedException, ProcedureYieldException, InterruptedException {
+    LOG.debug("Failure Recovery, TransitRegionStateProcedure executeFromState: {}", state);
+    RegionStateNode regionNode = getRegionStateNode(env);
+    try {
+      switch (state) {
+        case REGION_STATE_TRANSITION_GET_ASSIGN_CANDIDATE:
+          // Need to do some sanity check for replica region, if the region does not exist at
+          // master, do not try to assign the replica region, log error and return.
+          if (!RegionReplicaUtil.isDefaultReplica(regionNode.getRegionInfo())) {
+            LOG.debug("Failure Recovery, entering REGION_STATE_TRANSITION_GET_ASSIGN_CANDIDATE");
             RegionInfo defaultRI =
               RegionReplicaUtil.getRegionInfoForDefaultReplica(regionNode.getRegionInfo());
             if (

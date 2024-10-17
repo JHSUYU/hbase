@@ -37,9 +37,11 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.RegionInfo;
 import org.apache.hadoop.hbase.client.TableState;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.master.RegionState;
 import org.apache.hadoop.hbase.master.RegionState.State;
 import org.apache.hadoop.hbase.master.TableStateManager;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -77,12 +79,17 @@ public class RegionStates {
   private final ConcurrentSkipListMap<byte[], RegionStateNode> regionsMap =
     new ConcurrentSkipListMap<>(Bytes.BYTES_COMPARATOR);
 
+  private ConcurrentSkipListMap<byte[], RegionStateNode> regionsMap$dryrun =
+    null;
+
   /**
    * this map is a hack to lookup of region in master by encoded region name is O(n). must put and
    * remove with regionsMap.
    */
   private final ConcurrentSkipListMap<String, RegionStateNode> encodedRegionsMap =
     new ConcurrentSkipListMap<>();
+
+  private ConcurrentSkipListMap<String, RegionStateNode> encodedRegionsMap$dryrun =null;
 
   private final ConcurrentSkipListMap<RegionInfo, RegionStateNode> regionInTransition =
     new ConcurrentSkipListMap<>(RegionInfo.COMPARATOR);
@@ -99,6 +106,8 @@ public class RegionStates {
 
   private final ConcurrentHashMap<ServerName, ServerStateNode> serverMap =
     new ConcurrentHashMap<ServerName, ServerStateNode>();
+
+  private ConcurrentHashMap<ServerName, ServerStateNode> serverMap$dryrun = null;
 
   public RegionStates() {
   }
@@ -123,6 +132,9 @@ public class RegionStates {
   // RegionStateNode helpers
   // ==========================================================================
   RegionStateNode createRegionStateNode(RegionInfo regionInfo) {
+    if(TraceUtil.isDryRun()){
+      return createRegionStateNode$instrumentation(regionInfo);
+    }
     synchronized (regionsMapLock) {
       RegionStateNode node = regionsMap.computeIfAbsent(regionInfo.getRegionName(),
         key -> new RegionStateNode(regionInfo, regionInTransition));
@@ -135,13 +147,67 @@ public class RegionStates {
     }
   }
 
+  RegionStateNode createRegionStateNode$instrumentation(RegionInfo regionInfo) {
+    if(regionsMap$dryrun == null){
+      regionsMap$dryrun = DryRunManager.clone(regionsMap);
+    }
+
+    if(encodedRegionsMap$dryrun == null) {
+      encodedRegionsMap$dryrun = DryRunManager.clone(encodedRegionsMap);
+    }
+    synchronized (regionsMapLock) {
+      RegionStateNode node = regionsMap$dryrun.computeIfAbsent(regionInfo.getRegionName(),
+        key -> new RegionStateNode(regionInfo, regionInTransition));
+
+      if (encodedRegionsMap$dryrun.get(regionInfo.getEncodedName()) != node) {
+        encodedRegionsMap$dryrun.put(regionInfo.getEncodedName(), node);
+      }
+
+      return node;
+    }
+  }
+
   public RegionStateNode getOrCreateRegionStateNode(RegionInfo regionInfo) {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to getOrCreateRegionStateNode$instrumentation");
+      return getOrCreateRegionStateNode$instrumentation(regionInfo);
+    }
+    RegionStateNode node = getRegionStateNodeFromName(regionInfo.getRegionName());
+    LOG.debug("Failure Recovery -, node is null: " + (node == null));
+    return node != null ? node : createRegionStateNode(regionInfo);
+  }
+
+  public RegionStateNode getOrCreateRegionStateNode$instrumentation(RegionInfo regionInfo) {
     RegionStateNode node = getRegionStateNodeFromName(regionInfo.getRegionName());
     return node != null ? node : createRegionStateNode(regionInfo);
   }
 
   public RegionStateNode getRegionStateNodeFromName(byte[] regionName) {
+    if(TraceUtil.isDryRun()){
+      return getRegionStateNodeFromName$instrumentation(regionName);
+    }
+    //LOG.info("Not Failure Recovery, regionsMap.size is: " + regionsMap.size());
     return regionsMap.get(regionName);
+  }
+
+  public RegionStateNode getRegionStateNodeFromName$instrumentation(byte[] regionName) {
+    if(regionsMap$dryrun == null){
+
+      regionsMap$dryrun = DryRunManager.clone(regionsMap);
+      LOG.info("regionsMap$dryrun size is: " + regionsMap$dryrun.size());
+      LOG.info("regionsMap size is: " + regionsMap.size());
+    }
+    LOG.debug("regionsMap$dryrun size is: " + regionsMap$dryrun.size());
+    LOG.debug("regionsMap size is: " + regionsMap.size());
+    //print regionsMap$dryrun and regionsMap to compare
+//    for(Map.Entry<byte[], RegionStateNode> entry : regionsMap$dryrun.entrySet()){
+//      LOG.debug("Failure Recovery, regionsMap$dryrun: " + entry.getKey() + " " + entry.getValue());
+//    }
+//    for(Map.Entry<byte[], RegionStateNode> entry : regionsMap.entrySet()){
+//      LOG.debug("Failure Recovery, regionsMap: " + entry.getKey() + " " + entry.getValue());
+//    }
+
+    return regionsMap$dryrun.get(regionName);
   }
 
   public RegionStateNode getRegionStateNodeFromEncodedRegionName(final String encodedRegionName) {
@@ -149,6 +215,13 @@ public class RegionStates {
   }
 
   public RegionStateNode getRegionStateNode(RegionInfo regionInfo) {
+    if(TraceUtil.isDryRun()){
+      return getRegionStateNode$instrumentation(regionInfo);
+    }
+    return getRegionStateNodeFromName(regionInfo.getRegionName());
+  }
+
+  public RegionStateNode getRegionStateNode$instrumentation(RegionInfo regionInfo) {
     return getRegionStateNodeFromName(regionInfo.getRegionName());
   }
 
@@ -405,6 +478,17 @@ public class RegionStates {
   // ============================================================================================
 
   private void setServerState(ServerName serverName, ServerState state) {
+    if(TraceUtil.isDryRun()){
+      setServerState$instrumentation(serverName, state);
+      return;
+    }
+    ServerStateNode serverNode = getOrCreateServer(serverName);
+    synchronized (serverNode) {
+      serverNode.setState(state);
+    }
+  }
+
+  private void setServerState$instrumentation(ServerName serverName, ServerState state) {
     ServerStateNode serverNode = getOrCreateServer(serverName);
     synchronized (serverNode) {
       serverNode.setState(state);
@@ -416,7 +500,20 @@ public class RegionStates {
    * @see #metaLogSplit(ServerName)
    */
   public void metaLogSplitting(ServerName serverName) {
+    if(TraceUtil.isDryRun()){
+      metaLogSplitting$instrumentation(serverName);
+      return;
+    }
     setServerState(serverName, ServerState.SPLITTING_META);
+  }
+
+  public void metaLogSplitting$instrumentation(ServerName serverName) {
+    if(serverMap$dryrun == null){
+      serverMap$dryrun = DryRunManager.clone(serverMap);
+    }
+    if(serverMap$dryrun.containsKey(serverName)){
+      setServerState(serverName, ServerState.SPLITTING_META);
+    }
   }
 
   /**
@@ -751,7 +848,19 @@ public class RegionStates {
    * where we can.
    */
   public ServerStateNode getOrCreateServer(final ServerName serverName) {
+    if(TraceUtil.isDryRun()){
+      return getOrCreateServer$instrumentation(serverName);
+    }
     return serverMap.computeIfAbsent(serverName, key -> new ServerStateNode(key));
+  }
+
+  public ServerStateNode getOrCreateServer$instrumentation(final ServerName serverName) {
+    if(serverMap$dryrun == null){
+      serverMap$dryrun = DryRunManager.clone(serverMap);
+      LOG.debug("Failure Recovery, serverMap$dryrun size is: " + serverMap$dryrun.size());
+      LOG.debug("Failure Recovery, serverMap size is: " + serverMap.size());
+    }
+    return serverMap$dryrun.computeIfAbsent(serverName, key -> new ServerStateNode(key));
   }
 
   /**

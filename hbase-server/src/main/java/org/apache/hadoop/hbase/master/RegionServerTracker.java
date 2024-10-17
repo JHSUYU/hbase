@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.master;
 
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -32,6 +33,7 @@ import org.apache.hadoop.hbase.ServerMetrics;
 import org.apache.hadoop.hbase.ServerMetricsBuilder;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.client.VersionInfoUtil;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.zookeeper.ZKListener;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
@@ -65,7 +67,9 @@ public class RegionServerTracker extends ZKListener {
   // indicate whether we are active master
   private boolean active;
   private volatile Set<ServerName> regionServers = Collections.emptySet();
+  private volatile Set<ServerName> regionServers$dryrun = null;
   private final MasterServices server;
+  private MasterServices server$dryrun = null;
   // As we need to send request to zk when processing the nodeChildrenChanged event, we'd better
   // move the operation to a single threaded thread pool in order to not block the zk event
   // processing since all the zk listener across HMaster will be called in one thread sequentially.
@@ -164,8 +168,62 @@ public class RegionServerTracker extends ZKListener {
   // execute the operations which are only needed for active masters, such as expire old servers,
   // add new servers, etc.
   private void processAsActiveMaster(Set<ServerName> newServers) {
+    if(TraceUtil.isDryRun()){
+      LOG.info("Failure Recovery, processAsActiveMaster redircted to dry run");
+      processAsActiveMaster$instrumentation(newServers);
+      return;
+    }
     Set<ServerName> oldServers = regionServers;
     ServerManager serverManager = server.getServerManager();
+    // expire dead servers
+    for (ServerName crashedServer : Sets.difference(oldServers, newServers)) {
+      LOG.info("RegionServer ephemeral node deleted, processing expiration [{}]", crashedServer);
+      Thread dryRunThread = new Thread(() -> {
+        TraceUtil.createDryRunBaggage();
+        try {
+          serverManager.expireServer(crashedServer);
+        } finally {
+          TraceUtil.createDryRunBaggage();
+        }
+      });
+      dryRunThread.start();
+      try{
+        dryRunThread.join();
+      } catch (InterruptedException e) {
+        LOG.error("dryRunThread join failed", e);
+      }
+      //serverManager.expireServer(crashedServer);
+    }
+    // check whether there are new servers, log them
+    boolean newServerAdded = false;
+    for (ServerName sn : newServers) {
+      if (!oldServers.contains(sn)) {
+        newServerAdded = true;
+        LOG.info("RegionServer ephemeral node created, adding [" + sn + "]");
+      }
+    }
+    if (newServerAdded && server.isInitialized()) {
+      // Only call the check to move servers if a RegionServer was added to the cluster; in this
+      // case it could be a server with a new version so it makes sense to run the check.
+      server.checkIfShouldMoveSystemRegionAsync();
+    }
+  }
+
+  private void processAsActiveMaster$instrumentation(Set<ServerName> newServers) {
+    if(regionServers$dryrun == null){
+      regionServers$dryrun = DryRunManager.clone(regionServers);
+      //Compare regionServers and regionServers$dryrun
+      LOG.info("regionServers class is {}， size is {}", regionServers.getClass(), regionServers.size());
+      LOG.info("regionServers$dryrun class is {}", regionServers$dryrun.getClass());
+      if(regionServers$dryrun.size() != regionServers.size()){
+        LOG.error("regionServers and regionServers$dryrun size mismatch");
+      }
+    }
+    Set<ServerName> oldServers = regionServers;
+    if(server$dryrun == null){
+      server$dryrun = DryRunManager.clone(server);
+    }
+    ServerManager serverManager = server$dryrun.getServerManager();
     // expire dead servers
     for (ServerName crashedServer : Sets.difference(oldServers, newServers)) {
       LOG.info("RegionServer ephemeral node deleted, processing expiration [{}]", crashedServer);
@@ -186,6 +244,32 @@ public class RegionServerTracker extends ZKListener {
     }
   }
 
+  private synchronized void refresh$instrumentation() {
+    List<String> names;
+    final Span span = TraceUtil.createSpan("RegionServerTracker.refresh");
+    try (final Scope ignored = span.makeCurrent()) {
+      try {
+        names = ZKUtil.listChildrenAndWatchForNewChildren(watcher, watcher.getZNodePaths().rsZNode);
+      } catch (KeeperException e) {
+        // here we need to abort as we failed to set watcher on the rs node which means that we can
+        // not track the node deleted event any more.
+        server.abort("Unexpected zk exception getting RS nodes", e);
+        return;
+      }
+      Set<ServerName> newServers = CollectionUtils.isEmpty(names)
+        ? Collections.emptySet()
+        : names.stream().map(ServerName::parseServerName)
+        .collect(Collectors.collectingAndThen(Collectors.toSet(), Collections::unmodifiableSet));
+      if (active) {
+        processAsActiveMaster(newServers);
+      }
+      this.regionServers = newServers;
+      span.setStatus(StatusCode.OK);
+    } finally {
+      span.end();
+    }
+  }
+
   private synchronized void refresh() {
     List<String> names;
     final Span span = TraceUtil.createSpan("RegionServerTracker.refresh");
@@ -202,9 +286,7 @@ public class RegionServerTracker extends ZKListener {
         ? Collections.emptySet()
         : names.stream().map(ServerName::parseServerName)
           .collect(Collectors.collectingAndThen(Collectors.toSet(), Collections::unmodifiableSet));
-      if (active) {
-        processAsActiveMaster(newServers);
-      }
+      processAsActiveMaster(newServers);
       this.regionServers = newServers;
       span.setStatus(StatusCode.OK);
     } finally {

@@ -36,6 +36,7 @@ import org.apache.hadoop.hbase.exceptions.ConnectionClosedException;
 import org.apache.hadoop.hbase.exceptions.ConnectionClosingException;
 import org.apache.hadoop.hbase.exceptions.TimeoutIOException;
 import org.apache.hadoop.hbase.net.Address;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.ipc.RemoteException;
@@ -118,8 +119,11 @@ class IPCUtil {
     RequestHeader.Builder builder = RequestHeader.newBuilder();
     builder.setCallId(call.id);
     RPCTInfo.Builder traceBuilder = RPCTInfo.newBuilder();
+    boolean isDryRun = TraceUtil.isDryRun();
+    Context.current().with(TraceUtil.IS_DRY_RUN, isDryRun).makeCurrent();
     GlobalOpenTelemetry.getPropagators().getTextMapPropagator().inject(Context.current(),
       traceBuilder, (carrier, key, value) -> carrier.putHeaders(key, value));
+    traceBuilder.putHeaders("is_dry_run", Boolean.toString(isDryRun));
     builder.setTraceInfo(traceBuilder.build());
     builder.setMethodName(call.md.getName());
     builder.setRequestParam(call.param != null);

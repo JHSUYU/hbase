@@ -53,6 +53,7 @@ public class CallRunner {
   private MonitoredRPCHandler status;
   private final Span span;
   private volatile boolean successful;
+  public boolean isDryRun;
 
   /**
    * On construction, adds the size of this call to the running count of outstanding call sizes.
@@ -68,6 +69,17 @@ public class CallRunner {
     if (call != null && rpcServer != null) {
       this.rpcServer.addCallSize(call.getSize());
     }
+  }
+
+  CallRunner(final RpcServerInterface rpcServer, final RpcCall call, boolean isDryRun) {
+    this.call = call;
+    this.rpcServer = rpcServer;
+    this.span = Span.current();
+    // Add size of the call to queue size.
+    if (call != null && rpcServer != null) {
+      this.rpcServer.addCallSize(call.getSize());
+    }
+    this.isDryRun = isDryRun;
   }
 
   public RpcCall getRpcCall() {
@@ -88,6 +100,9 @@ public class CallRunner {
   }
 
   public void run() {
+    if(isDryRun){
+      TraceUtil.createDryRunBaggage();
+    }
     try (Scope ignored = span.makeCurrent()) {
       if (call.disconnectSince() >= 0) {
         RpcServer.LOG.debug("{}: skipped {}", Thread.currentThread().getName(), call);
