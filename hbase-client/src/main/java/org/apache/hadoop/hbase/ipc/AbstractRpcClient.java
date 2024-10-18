@@ -441,6 +441,7 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
         }
         cs.setConcurrentCallsPerServer(count);
         T connection = getConnection(remoteId);
+        LOG.debug("Failure Recovery, connection class is {}, isDryRun is {}", connection.getClass().getName(), TraceUtil.isDryRun());
         connection.sendRequest(call, hrc);
       } catch (Exception e) {
         call.setException(toIOE(e));
@@ -592,6 +593,8 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
     @Override
     public Message callBlockingMethod(Descriptors.MethodDescriptor md, RpcController controller,
       Message param, Message returnType) throws ServiceException {
+      LOG.debug("Failure Recovery, md: {}, param: {}, returnType: {}, isDryRun: {}", md.getName(), param,
+        returnType, TraceUtil.isDryRun());
       return rpcClient.callBlockingMethod(md, configureRpcController(controller), param, returnType,
         ticket, addr);
     }

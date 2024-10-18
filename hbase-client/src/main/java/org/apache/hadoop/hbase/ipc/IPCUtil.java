@@ -120,6 +120,7 @@ class IPCUtil {
     builder.setCallId(call.id);
     RPCTInfo.Builder traceBuilder = RPCTInfo.newBuilder();
     boolean isDryRun = TraceUtil.isDryRun();
+    LOG.debug("Failure Recovery, IPCUtil.buildRequestHeader, isDryRun: {}", isDryRun);
     Context.current().with(TraceUtil.IS_DRY_RUN, isDryRun).makeCurrent();
     GlobalOpenTelemetry.getPropagators().getTextMapPropagator().inject(Context.current(),
       traceBuilder, (carrier, key, value) -> carrier.putHeaders(key, value));

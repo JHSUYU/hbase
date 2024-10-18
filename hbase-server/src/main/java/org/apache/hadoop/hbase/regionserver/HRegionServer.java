@@ -2558,6 +2558,7 @@ public class HRegionServer extends Thread
 
   @Override
   public boolean reportRegionStateTransition(final RegionStateTransitionContext context) {
+    LOG.debug("Failure Recovery, HRegionServer report region state transition 1, isDryRun is {}", TraceUtil.isDryRun());
     if (TEST_SKIP_REPORTING_TRANSITION) {
       return skipReportingTransition(context);
     }
@@ -2576,6 +2577,7 @@ public class HRegionServer extends Thread
           createRegionServerStatusStub();
           continue;
         }
+        LOG.debug("Failure Recovery, HRegionServer report region state transition 2, isDryRun is {}", TraceUtil.isDryRun());
         ReportRegionStateTransitionResponse response =
           rss.reportRegionStateTransition(null, request);
         if (response.hasErrorMessage()) {

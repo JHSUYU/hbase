@@ -215,6 +215,8 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
     if(procedure$dryrun == null){
       procedure$dryrun = DryRunManager.clone(procedure);
     }
+    //state = new Object
+    //state.field
     TransitRegionStateProcedure proc = this.procedure$dryrun;
     if (proc != null) {
       long lastUpdate = proc.getLastUpdate();

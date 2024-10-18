@@ -119,6 +119,7 @@ import org.apache.hadoop.hbase.security.access.UserPermission;
 import org.apache.hadoop.hbase.security.visibility.VisibilityController;
 import org.apache.hadoop.hbase.snapshot.ClientSnapshotDescriptionUtils;
 import org.apache.hadoop.hbase.snapshot.SnapshotDescriptionUtils;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.ForeignExceptionUtil;
@@ -1693,6 +1694,7 @@ public class MasterRpcServices extends RSRpcServices
   @Override
   public ReportRegionStateTransitionResponse reportRegionStateTransition(RpcController c,
     ReportRegionStateTransitionRequest req) throws ServiceException {
+    LOG.debug("Failure Recovery, MasterRpcServices.java isDryRun is "+ TraceUtil.isDryRun());
     try {
       master.checkServiceStarted();
       return master.getAssignmentManager().reportRegionStateTransition(req);
