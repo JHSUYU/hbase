@@ -267,7 +267,7 @@ public class ServerCrashProcedure extends
           setNextState(ServerCrashState.SERVER_CRASH_CLAIM_REPLICATION_QUEUES);
           break;
         case SERVER_CRASH_CLAIM_REPLICATION_QUEUES:
-          addChildProcedure(new ClaimReplicationQueuesProcedure(serverName));
+          addChildProcedure(new ClaimReplicationQueuesProcedure(serverName, isDryRun));
           setNextState(ServerCrashState.SERVER_CRASH_FINISH);
           break;
         case SERVER_CRASH_FINISH:

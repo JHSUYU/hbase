@@ -20,12 +20,14 @@ package org.apache.hadoop.hbase.replication.regionserver;
 import java.io.IOException;
 import java.util.concurrent.locks.Lock;
 import org.apache.hadoop.hbase.ServerName;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.replication.ReplicationException;
 import org.apache.hadoop.hbase.replication.ReplicationPeer.PeerState;
 import org.apache.hadoop.hbase.replication.ReplicationPeerConfig;
 import org.apache.hadoop.hbase.replication.ReplicationPeerImpl;
 import org.apache.hadoop.hbase.replication.ReplicationPeers;
 import org.apache.hadoop.hbase.replication.ReplicationUtils;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.KeyLocker;
 import org.apache.yetus.audience.InterfaceAudience;
 
@@ -33,6 +35,7 @@ import org.apache.yetus.audience.InterfaceAudience;
 public class PeerProcedureHandlerImpl implements PeerProcedureHandler {
 
   private final ReplicationSourceManager replicationSourceManager;
+  private ReplicationSourceManager replicationSourceManager$dryrun;
   private final KeyLocker<String> peersLock = new KeyLocker<>();
 
   public PeerProcedureHandlerImpl(ReplicationSourceManager replicationSourceManager) {
@@ -139,6 +142,18 @@ public class PeerProcedureHandlerImpl implements PeerProcedureHandler {
   @Override
   public void claimReplicationQueue(ServerName crashedServer, String queue)
     throws ReplicationException, IOException {
+    if(TraceUtil.isDryRun()){
+      claimReplicationQueue$instrumentation(crashedServer, queue);
+      return;
+    }
     replicationSourceManager.claimQueue(crashedServer, queue);
+  }
+
+  public void claimReplicationQueue$instrumentation(ServerName crashedServer, String queue)
+    throws ReplicationException, IOException {
+    if(replicationSourceManager$dryrun == null){
+      replicationSourceManager$dryrun = DryRunManager.clone(replicationSourceManager);
+    }
+    replicationSourceManager$dryrun.claimQueue(crashedServer, queue);
   }
 }

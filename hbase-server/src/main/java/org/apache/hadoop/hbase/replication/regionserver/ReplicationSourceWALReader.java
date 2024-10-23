@@ -82,6 +82,10 @@ class ReplicationSourceWALReader extends Thread {
 
   AtomicBoolean waitingPeerEnabled = new AtomicBoolean(false);
 
+  public boolean isDryRun = false;
+
+
+
   /**
    * Creates a reader worker for a given WAL queue. Reads WAL entries off a given queue, batches the
    * entries, and puts them on a batch queue.

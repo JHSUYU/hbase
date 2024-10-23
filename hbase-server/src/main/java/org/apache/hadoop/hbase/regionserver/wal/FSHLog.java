@@ -46,6 +46,8 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Abortable;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.client.RegionInfo;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
@@ -129,6 +131,8 @@ public class FSHLog extends AbstractFSWAL<Writer> {
    * sure of our ordering and it is also where we do batching up of handler sync calls.
    */
   private final Disruptor<RingBufferTruck> disruptor;
+
+  public Disruptor<RingBufferTruck> disruptor$dryrun;
 
   /**
    * This fellow is run by the above appendExecutor service but it is all about batching up appends
@@ -512,6 +516,21 @@ public class FSHLog extends AbstractFSWAL<Writer> {
   @Override
   protected long append(final RegionInfo hri, final WALKeyImpl key, final WALEdit edits,
     final boolean inMemstore) throws IOException {
+    LOG.debug("Failure Recovery, dry run in append FSHLog");
+    if(TraceUtil.isDryRun()){
+      return append$instrumentation(hri, key, edits, inMemstore);
+    }
+    return stampSequenceIdAndPublishToRingBuffer(hri, key, edits, inMemstore,
+      disruptor.getRingBuffer());
+  }
+
+  protected long append$instrumentation(final RegionInfo hri, final WALKeyImpl key, final WALEdit edits,
+    final boolean inMemstore) throws IOException {
+    LOG.debug("Failure Recovery, dry run in append FSHLog");
+//    if(disruptor$dryrun == null){
+//      disruptor$dryrun = DryRunManager.deepClone(disruptor);
+//    }
+    LOG.debug("Failure Recovery, deepClone disruptor in append FSHLog");
     return stampSequenceIdAndPublishToRingBuffer(hri, key, edits, inMemstore,
       disruptor.getRingBuffer());
   }
@@ -1030,6 +1049,107 @@ public class FSHLog extends AbstractFSWAL<Writer> {
     @Override
     // We can set endOfBatch in the below method if at end of our this.syncFutures array
     public void onEvent(final RingBufferTruck truck, final long sequence, boolean endOfBatch)
+      throws Exception {
+//      if(truck.isDryRun){
+//        onEvent$instrumentation(truck, sequence, endOfBatch);
+//        return;
+//      }
+      // Appends and syncs are coming in order off the ringbuffer. We depend on this fact. We'll
+      // add appends to dfsclient as they come in. Batching appends doesn't give any significant
+      // benefit on measurement. Handler sync calls we will batch up. If we get an exception
+      // appending an edit, we fail all subsequent appends and syncs with the same exception until
+      // the WAL is reset. It is important that we not short-circuit and exit early this method.
+      // It is important that we always go through the attainSafePoint on the end. Another thread,
+      // the log roller may be waiting on a signal from us here and will just hang without it.
+
+      try {
+        if (truck.type() == RingBufferTruck.Type.SYNC) {
+          this.syncFutures[this.syncFuturesCount.getAndIncrement()] = truck.unloadSync();
+          // Force flush of syncs if we are carrying a full complement of syncFutures.
+          if (this.syncFuturesCount.get() == this.syncFutures.length) {
+            endOfBatch = true;
+          }
+        } else if (truck.type() == RingBufferTruck.Type.APPEND) {
+          FSWALEntry entry = truck.unloadAppend();
+          try {
+            if (this.exception != null) {
+              // Return to keep processing events coming off the ringbuffer
+              return;
+            }
+            append(entry);
+          } catch (Exception e) {
+            // Failed append. Record the exception.
+            this.exception = e;
+            // invoking cleanupOutstandingSyncsOnException when append failed with exception,
+            // it will cleanup existing sync requests recorded in syncFutures but not offered to
+            // SyncRunner yet,
+            // so there won't be any sync future left over if no further truck published to
+            // disruptor.
+            cleanupOutstandingSyncsOnException(sequence,
+              this.exception instanceof DamagedWALException
+                ? this.exception
+                : new DamagedWALException("On sync", this.exception));
+            // Return to keep processing events coming off the ringbuffer
+            return;
+          } finally {
+            entry.release();
+          }
+        } else {
+          // What is this if not an append or sync. Fail all up to this!!!
+          cleanupOutstandingSyncsOnException(sequence,
+            new IllegalStateException("Neither append nor sync"));
+          // Return to keep processing.
+          return;
+        }
+
+        // TODO: Check size and if big go ahead and call a sync if we have enough data.
+        // This is a sync. If existing exception, fall through. Else look to see if batch.
+        if (this.exception == null) {
+          // If not a batch, return to consume more events from the ring buffer before proceeding;
+          // we want to get up a batch of syncs and appends before we go do a filesystem sync.
+          if (!endOfBatch || this.syncFuturesCount.get() <= 0) {
+            return;
+          }
+          // syncRunnerIndex is bound to the range [0, Integer.MAX_INT - 1] as follows:
+          // * The maximum value possible for syncRunners.length is Integer.MAX_INT
+          // * syncRunnerIndex starts at 0 and is incremented only here
+          // * after the increment, the value is bounded by the '%' operator to
+          // [0, syncRunners.length), presuming the value was positive prior to
+          // the '%' operator.
+          // * after being bound to [0, Integer.MAX_INT - 1], the new value is stored in
+          // syncRunnerIndex ensuring that it can't grow without bound and overflow.
+          // * note that the value after the increment must be positive, because the most it
+          // could have been prior was Integer.MAX_INT - 1 and we only increment by 1.
+          this.syncRunnerIndex = (this.syncRunnerIndex + 1) % this.syncRunners.length;
+          try {
+            // Below expects that the offer 'transfers' responsibility for the outstanding syncs to
+            // the syncRunner. We should never get an exception in here.
+            this.syncRunners[this.syncRunnerIndex].offer(sequence, this.syncFutures,
+              this.syncFuturesCount.get());
+          } catch (Exception e) {
+            // Should NEVER get here.
+            requestLogRoll(ERROR);
+            this.exception = new DamagedWALException("Failed offering sync", e);
+          }
+        }
+        // We may have picked up an exception above trying to offer sync
+        if (this.exception != null) {
+          cleanupOutstandingSyncsOnException(sequence,
+            this.exception instanceof DamagedWALException
+              ? this.exception
+              : new DamagedWALException("On sync", this.exception));
+        }
+        attainSafePoint(sequence);
+        // It is critical that we offer the futures back to the cache for reuse here after the
+        // safe point is attained and all the clean up has been done. There have been
+        // issues with reusing sync futures early causing WAL lockups, see HBASE-25984.
+        offerDoneSyncsBackToCache();
+      } catch (Throwable t) {
+        LOG.error("UNEXPECTED!!! syncFutures.length=" + this.syncFutures.length, t);
+      }
+    }
+
+    public void onEvent$instrumentation(final RingBufferTruck truck, final long sequence, boolean endOfBatch)
       throws Exception {
       // Appends and syncs are coming in order off the ringbuffer. We depend on this fact. We'll
       // add appends to dfsclient as they come in. Batching appends doesn't give any significant

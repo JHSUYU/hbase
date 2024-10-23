@@ -44,6 +44,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import io.opentelemetry.context.Context;
 import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.apache.hadoop.hbase.CellScannable;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
@@ -58,6 +59,7 @@ import org.apache.hadoop.hbase.client.RetriesExhaustedException.ThrowableWithExt
 import org.apache.hadoop.hbase.client.backoff.ClientBackoffPolicy;
 import org.apache.hadoop.hbase.client.backoff.ServerStatistics;
 import org.apache.hadoop.hbase.ipc.HBaseRpcController;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -365,6 +367,11 @@ class AsyncBatchRpcRetryingCaller<T> {
   }
 
   private void sendToServer(ServerName serverName, ServerRequest serverReq, int tries) {
+    if(TraceUtil.isDryRun()) {
+      LOG.debug("Failure Recovery: redirect to sendToServer dryrun");
+//      sendToServer$instrumentation(serverName, serverReq, tries);
+//      return;
+    }
     long remainingNs;
     if (operationTimeoutNs > 0) {
       remainingNs = remainingTimeNs();
@@ -419,6 +426,11 @@ class AsyncBatchRpcRetryingCaller<T> {
   // We will make use of the ServerStatisticTracker to determine whether we need to delay a bit,
   // based on the load of the region server and the region.
   private void sendOrDelay(Map<ServerName, ServerRequest> actionsByServer, int tries) {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery: redirect to sendOrDelay dryrun");
+      sendOrDelay$instrumentation(actionsByServer, tries);
+      return;
+    }
     Optional<MetricsConnection> metrics = conn.getConnectionMetrics();
     Optional<ServerStatisticTracker> optStats = conn.getStatisticsTracker();
     if (!optStats.isPresent()) {
@@ -444,6 +456,42 @@ class AsyncBatchRpcRetryingCaller<T> {
           retryTimer.newTimeout(timer -> sendToServer(serverName, sr, tries), backoff,
             TimeUnit.MILLISECONDS);
         } else {
+          metrics.ifPresent(MetricsConnection::incrNormalRunners);
+          sendToServer(serverName, sr, tries);
+        }
+      });
+    });
+  }
+
+  private void sendOrDelay$instrumentation(Map<ServerName, ServerRequest> actionsByServer, int tries) {
+    Optional<MetricsConnection> metrics = conn.getConnectionMetrics();
+    Optional<ServerStatisticTracker> optStats = conn.getStatisticsTracker();
+    if (!optStats.isPresent()) {
+      LOG.debug("Failure Recovery: optStats is not present");
+      actionsByServer.forEach((serverName, serverReq) -> {
+        metrics.ifPresent(MetricsConnection::incrNormalRunners);
+        sendToServer(serverName, serverReq, tries);
+      });
+      return;
+    }
+    ServerStatisticTracker stats = optStats.get();
+    ClientBackoffPolicy backoffPolicy = conn.getBackoffPolicy();
+    actionsByServer.forEach((serverName, serverReq) -> {
+      ServerStatistics serverStats = stats.getStats(serverName);
+      Map<Long, ServerRequest> groupByBackoff = new HashMap<>();
+      serverReq.actionsByRegion.forEach((regionName, regionReq) -> {
+        long backoff = backoffPolicy.getBackoffTime(serverName, regionName, serverStats);
+        groupByBackoff.computeIfAbsent(backoff, k -> new ServerRequest())
+          .setRegionRequest(regionName, regionReq);
+      });
+      groupByBackoff.forEach((backoff, sr) -> {
+        if (backoff > 0) {
+          LOG.debug("Failure Recovery: backoff > 0");
+          metrics.ifPresent(m -> m.incrDelayRunnersAndUpdateDelayInterval(backoff));
+          retryTimer.newTimeout(timer -> sendToServer(serverName, sr, tries), backoff,
+            TimeUnit.MILLISECONDS);
+        } else {
+          LOG.debug("Failure Recovery: backoff <= 0");
           metrics.ifPresent(MetricsConnection::incrNormalRunners);
           sendToServer(serverName, sr, tries);
         }
@@ -495,6 +543,10 @@ class AsyncBatchRpcRetryingCaller<T> {
   }
 
   private void groupAndSend(Stream<Action> actions, int tries) {
+    if(TraceUtil.isDryRun()){
+      groupAndSend$instrumentation(actions, tries);
+      return;
+    }
     long locateTimeoutNs;
     if (operationTimeoutNs > 0) {
       locateTimeoutNs = remainingTimeNs();
@@ -533,7 +585,51 @@ class AsyncBatchRpcRetryingCaller<T> {
       });
   }
 
+  private void groupAndSend$instrumentation(Stream<Action> actions, int tries) {
+    Context currentContext = Context.current();
+    long locateTimeoutNs;
+    if (operationTimeoutNs > 0) {
+      locateTimeoutNs = remainingTimeNs();
+      if (locateTimeoutNs <= 0) {
+        failAll(actions, tries);
+        return;
+      }
+    } else {
+      locateTimeoutNs = -1L;
+    }
+    ConcurrentMap<ServerName, ServerRequest> actionsByServer = new ConcurrentHashMap<>();
+    ConcurrentLinkedQueue<Action> locateFailed = new ConcurrentLinkedQueue<>();
+    addListener(CompletableFuture.allOf(actions
+      .map(action -> conn.getLocator().getRegionLocation(tableName, action.getAction().getRow(),
+        RegionLocateType.CURRENT, locateTimeoutNs).whenComplete((loc, error) -> {
+        if (error != null) {
+          error = unwrapCompletionException(translateException(error));
+          if (error instanceof DoNotRetryIOException) {
+            failOne(action, tries, error, EnvironmentEdgeManager.currentTime(), "");
+            return;
+          }
+          addError(action, error, null);
+          locateFailed.add(action);
+        } else {
+          computeIfAbsent(actionsByServer, loc.getServerName(), ServerRequest::new).addAction(loc,
+            action);
+        }
+      }))
+      .toArray(CompletableFuture[]::new)), (v, r) -> {
+      currentContext.makeCurrent();
+      if (!actionsByServer.isEmpty()) {
+        sendOrDelay(actionsByServer, tries);
+      }
+      if (!locateFailed.isEmpty()) {
+        tryResubmit(locateFailed.stream(), tries, false, false);
+      }
+    });
+  }
+
   public List<CompletableFuture<T>> call() {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery: AsyncBatchRpcRetryingCaller.call");
+    }
     groupAndSend(actions.stream(), 1);
     return futures;
   }

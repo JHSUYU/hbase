@@ -160,6 +160,12 @@
       <artifactId>kerb-simplekdc</artifactId>
       <scope>test</scope>
     </dependency>
+      <dependency>
+          <artifactId>cloning</artifactId>
+          <groupId>uk.com.robust-it</groupId>
+          <version>1.9.9</version>
+          <scope>compile</scope>
+      </dependency>
   </dependencies>
 
   <build>

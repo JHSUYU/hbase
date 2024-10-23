@@ -22,12 +22,14 @@ import static org.apache.hadoop.hbase.replication.ReplicationUtils.getAdaptiveTi
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.atomic.LongAccumulator;
+import io.opentelemetry.context.Context;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.replication.ReplicationEndpoint;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Threads;
 import org.apache.hadoop.hbase.wal.WAL.Entry;
@@ -76,6 +78,8 @@ public class ReplicationSourceShipper extends Thread {
   private final int getEntriesTimeout;
   private final int shipEditsTimeout;
 
+  public boolean isDryRun = false;
+
   public ReplicationSourceShipper(Configuration conf, String walGroupId,
     ReplicationSourceLogQueue logQueue, ReplicationSource source) {
     this.conf = conf;
@@ -95,6 +99,52 @@ public class ReplicationSourceShipper extends Thread {
 
   @Override
   public final void run() {
+    if(isDryRun || TraceUtil.isDryRun()){
+      TraceUtil.createDryRunBaggage();
+      LOG.debug("Failure Recovery: ReplicationSourceShipper.run() is a dry run, skipping the actual run");
+      run$instrumentation();
+      return;
+    }
+    setWorkerState(WorkerState.RUNNING);
+    LOG.info("Running ReplicationSourceShipper Thread for wal group: {}", this.walGroupId);
+    // Loop until we close down
+    while (isActive()) {
+      // Sleep until replication is enabled again
+      if (!source.isPeerEnabled()) {
+        // The peer enabled check is in memory, not expensive, so do not need to increase the
+        // sleep interval as it may cause a long lag when we enable the peer.
+        sleepForRetries("Replication is disabled", 1);
+        continue;
+      }
+      try {
+        WALEntryBatch entryBatch = entryReader.poll(getEntriesTimeout);
+        LOG.debug("Shipper from source {} got entry batch from reader: {}", source.getQueueId(),
+          entryBatch);
+        if (entryBatch == null) {
+          continue;
+        }
+        // the NO_MORE_DATA instance has no path so do not call shipEdits
+        if (entryBatch == WALEntryBatch.NO_MORE_DATA) {
+          noMoreData();
+        } else {
+          shipEdits(entryBatch);
+        }
+      } catch (InterruptedException | ReplicationRuntimeException e) {
+        // It is interrupted and needs to quit.
+        LOG.warn("Interrupted while waiting for next replication entry batch", e);
+        Thread.currentThread().interrupt();
+      }
+    }
+    // If the worker exits run loop without finishing its task, mark it as stopped.
+    if (!isFinished()) {
+      setWorkerState(WorkerState.STOPPED);
+    } else {
+      source.workerThreads.remove(this.walGroupId);
+      postFinish();
+    }
+  }
+
+  public final void run$instrumentation() {
     setWorkerState(WorkerState.RUNNING);
     LOG.info("Running ReplicationSourceShipper Thread for wal group: {}", this.walGroupId);
     // Loop until we close down

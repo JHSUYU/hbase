@@ -41,6 +41,7 @@ import org.apache.hadoop.hbase.replication.ReplicationPeers;
 import org.apache.hadoop.hbase.replication.ReplicationQueueStorage;
 import org.apache.hadoop.hbase.replication.ReplicationStorageFactory;
 import org.apache.hadoop.hbase.replication.ReplicationUtils;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.wal.WALFactory;
 import org.apache.hadoop.hbase.wal.WALProvider;
@@ -76,6 +77,7 @@ public class Replication implements ReplicationSourceService, ReplicationSinkSer
   private MetricsReplicationGlobalSourceSource globalMetricsSource;
 
   private PeerProcedureHandler peerProcedureHandler;
+  private PeerProcedureHandler peerProcedureHandler$dryrun;
 
   /**
    * Empty constructor
@@ -139,7 +141,17 @@ public class Replication implements ReplicationSourceService, ReplicationSinkSer
 
   @Override
   public PeerProcedureHandler getPeerProcedureHandler() {
+    if(TraceUtil.isDryRun()){
+      return getPeerProcedureHandler$instrumentation();
+    }
     return peerProcedureHandler;
+  }
+
+  public PeerProcedureHandler getPeerProcedureHandler$instrumentation() {
+    if(peerProcedureHandler$dryrun == null){
+      peerProcedureHandler$dryrun = new PeerProcedureHandlerImpl(replicationManager);
+    }
+    return peerProcedureHandler$dryrun;
   }
 
   /**

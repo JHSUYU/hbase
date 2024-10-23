@@ -108,6 +108,7 @@ import org.apache.hadoop.hbase.conf.ConfigurationManager;
 import org.apache.hadoop.hbase.conf.ConfigurationObserver;
 import org.apache.hadoop.hbase.coordination.ZkCoordinatedStateManager;
 import org.apache.hadoop.hbase.coprocessor.CoprocessorHost;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.exceptions.RegionMovedException;
 import org.apache.hadoop.hbase.exceptions.RegionOpeningException;
 import org.apache.hadoop.hbase.exceptions.UnknownProtocolException;
@@ -158,6 +159,7 @@ import org.apache.hadoop.hbase.regionserver.http.RSDumpServlet;
 import org.apache.hadoop.hbase.regionserver.http.RSStatusServlet;
 import org.apache.hadoop.hbase.regionserver.throttle.FlushThroughputControllerFactory;
 import org.apache.hadoop.hbase.regionserver.throttle.ThroughputController;
+import org.apache.hadoop.hbase.replication.regionserver.ClaimReplicationQueueCallable;
 import org.apache.hadoop.hbase.replication.regionserver.ReplicationLoad;
 import org.apache.hadoop.hbase.replication.regionserver.ReplicationSourceInterface;
 import org.apache.hadoop.hbase.replication.regionserver.ReplicationStatus;
@@ -276,6 +278,8 @@ public class HRegionServer extends Thread
    * {@link #submitRegionProcedure(long)}.
    */
   private final ConcurrentMap<Long, Long> submittedRegionProcedures = new ConcurrentHashMap<>();
+
+  public ConcurrentMap<Long, Long> submittedRegionProcedures$dryrun;
   /**
    * Used to cache the open/close region procedures which already executed. See
    * {@link #submitRegionProcedure(long)}.
@@ -283,6 +287,7 @@ public class HRegionServer extends Thread
   private final Cache<Long, Long> executedRegionProcedures =
     CacheBuilder.newBuilder().expireAfterAccess(600, TimeUnit.SECONDS).build();
 
+  public Cache<Long, Long> executedRegionProcedures$dryrun = null;
   /**
    * Used to cache the moved-out regions
    */
@@ -306,9 +311,14 @@ public class HRegionServer extends Thread
    */
   protected TableDescriptors tableDescriptors;
 
+  public TableDescriptors tableDescriptors$dryrun;
+
   // Replication services. If no replication, this handler will be null.
   private ReplicationSourceService replicationSourceHandler;
+  private ReplicationSourceService replicationSourceHandler$dryrun;
   private ReplicationSinkService replicationSinkHandler;
+  private ReplicationSinkService replicationSinkHandler$dryrun;
+
 
   // Compactions
   private CompactSplit compactSplitThread;
@@ -335,6 +345,8 @@ public class HRegionServer extends Thread
    * will be fresh when we need it.
    */
   private final Map<String, Address[]> regionFavoredNodesMap = new ConcurrentHashMap<>();
+
+  public Map<String, Address[]> regionFavoredNodesMap$dryrun;
 
   private LeaseManager leaseManager;
 
@@ -2819,12 +2831,33 @@ public class HRegionServer extends Thread
   /** Returns Return the object that implements the replication source executorService. */
   @InterfaceAudience.Private
   public ReplicationSourceService getReplicationSourceService() {
+    if(TraceUtil.isDryRun()){
+      return getReplicationSourceService$instrumentation();
+    }
     return replicationSourceHandler;
+  }
+
+  public ReplicationSourceService getReplicationSourceService$instrumentation() {
+    if(replicationSourceHandler$dryrun == null){
+      replicationSourceHandler$dryrun = DryRunManager.clone(replicationSourceHandler);
+    }
+    return replicationSourceHandler$dryrun;
   }
 
   /** Returns Return the object that implements the replication sink executorService. */
   ReplicationSinkService getReplicationSinkService() {
+    if(TraceUtil.isDryRun()){
+      return getReplicationSinkService$instrumentation();
+    }
     return replicationSinkHandler;
+  }
+
+  ReplicationSinkService getReplicationSinkService$instrumentation() {
+    if(replicationSinkHandler$dryrun == null){
+      replicationSinkHandler$dryrun = DryRunManager.clone(replicationSinkHandler);
+    }
+    LOG.debug("Failure Recovery, replicationSinkHandler class name is {}", replicationSinkHandler.getClass().getName());
+    return replicationSinkHandler$dryrun;
   }
 
   /**
@@ -3595,6 +3628,10 @@ public class HRegionServer extends Thread
   @Override
   public void updateRegionFavoredNodesMapping(String encodedRegionName,
     List<org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos.ServerName> favoredNodes) {
+    if(TraceUtil.isDryRun()){
+      updateRegionFavoredNodesMapping$instrumentation(encodedRegionName, favoredNodes);
+      return;
+    }
     Address[] addr = new Address[favoredNodes.size()];
     // Refer to the comment on the declaration of regionFavoredNodesMap on why
     // it is a map of region name to Address[]
@@ -3602,6 +3639,20 @@ public class HRegionServer extends Thread
       addr[i] = Address.fromParts(favoredNodes.get(i).getHostName(), favoredNodes.get(i).getPort());
     }
     regionFavoredNodesMap.put(encodedRegionName, addr);
+  }
+
+  public void updateRegionFavoredNodesMapping$instrumentation(String encodedRegionName,
+    List<org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos.ServerName> favoredNodes) {
+    Address[] addr = new Address[favoredNodes.size()];
+    // Refer to the comment on the declaration of regionFavoredNodesMap on why
+    // it is a map of region name to Address[]
+    for (int i = 0; i < favoredNodes.size(); i++) {
+      addr[i] = Address.fromParts(favoredNodes.get(i).getHostName(), favoredNodes.get(i).getPort());
+    }
+    if(regionFavoredNodesMap$dryrun == null){
+      regionFavoredNodesMap$dryrun = DryRunManager.clone(regionFavoredNodesMap);
+    }
+    regionFavoredNodesMap$dryrun.put(encodedRegionName, addr);
   }
 
   /**
@@ -3762,7 +3813,17 @@ public class HRegionServer extends Thread
   /** Returns Return table descriptors implementation. */
   @Override
   public TableDescriptors getTableDescriptors() {
+    if(TraceUtil.isDryRun()){
+      return getTableDescriptors$instrumentation();
+    }
     return this.tableDescriptors;
+  }
+
+  public TableDescriptors getTableDescriptors$instrumentation(){
+    if(this.tableDescriptors$dryrun == null){
+      this.tableDescriptors$dryrun = DryRunManager.clone(this.tableDescriptors);
+    }
+    return this.tableDescriptors$dryrun;
   }
 
   /**
@@ -3974,6 +4035,9 @@ public class HRegionServer extends Thread
    * @return true if the procedure can be submitted.
    */
   boolean submitRegionProcedure(long procId) {
+    if(TraceUtil.isDryRun()){
+      return submitRegionProcedure$instrumentation(procId);
+    }
     if (procId == -1) {
       return true;
     }
@@ -3985,6 +4049,30 @@ public class HRegionServer extends Thread
     }
     // Ignore the region procedures which already executed.
     if (executedRegionProcedures.getIfPresent(procId) != null) {
+      LOG.warn("Received procedure pid={}, which already executed, just ignore it", procId);
+      return false;
+    }
+    return true;
+  }
+
+  boolean submitRegionProcedure$instrumentation(long procId){
+    if (procId == -1) {
+      return true;
+    }
+    // Ignore the region procedures which already submitted.
+    if(submittedRegionProcedures$dryrun == null){
+      submittedRegionProcedures$dryrun = DryRunManager.clone(submittedRegionProcedures);
+    }
+    Long previous = submittedRegionProcedures$dryrun.putIfAbsent(procId, procId);
+    if (previous != null) {
+      LOG.warn("Received procedure pid={}, which already submitted, just ignore it", procId);
+      return false;
+    }
+    // Ignore the region procedures which already executed.
+    if (executedRegionProcedures$dryrun == null) {
+      executedRegionProcedures$dryrun = DryRunManager.clone(executedRegionProcedures);
+    }
+    if (executedRegionProcedures$dryrun.getIfPresent(procId) != null) {
       LOG.warn("Received procedure pid={}, which already executed, just ignore it", procId);
       return false;
     }

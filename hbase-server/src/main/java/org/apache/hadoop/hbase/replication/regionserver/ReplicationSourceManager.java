@@ -55,6 +55,7 @@ import org.apache.hadoop.hbase.replication.ReplicationPeerImpl;
 import org.apache.hadoop.hbase.replication.ReplicationPeers;
 import org.apache.hadoop.hbase.replication.ReplicationQueueInfo;
 import org.apache.hadoop.hbase.replication.ReplicationQueueStorage;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.wal.AbstractFSWALProvider;
 import org.apache.hadoop.hbase.wal.WAL;
@@ -308,6 +309,9 @@ public class ReplicationSourceManager {
    */
   private ReplicationSourceInterface createSource(String queueId, ReplicationPeer replicationPeer)
     throws IOException {
+    if(TraceUtil.isDryRun()){
+      return createSource$instrumentation(queueId, replicationPeer);
+    }
     ReplicationSourceInterface src = ReplicationSourceFactory.create(conf, queueId);
     // Init the just created replication source. Pass the default walProvider's wal file length
     // provider. Presumption is we replicate user-space Tables only. For hbase:meta region replica
@@ -315,6 +319,22 @@ public class ReplicationSourceManager {
     WALFileLengthProvider walFileLengthProvider = this.walFactory.getWALProvider() != null
       ? this.walFactory.getWALProvider().getWALFileLengthProvider()
       : p -> OptionalLong.empty();
+    src.init(conf, fs, this, queueStorage, replicationPeer, server, queueId, clusterId,
+      walFileLengthProvider, new MetricsSource(queueId));
+    return src;
+  }
+
+  private ReplicationSourceInterface createSource$instrumentation(String queueId, ReplicationPeer replicationPeer)
+    throws IOException {
+    ReplicationSourceInterface src = ReplicationSourceFactory.create(conf, queueId);
+    // Init the just created replication source. Pass the default walProvider's wal file length
+    // provider. Presumption is we replicate user-space Tables only. For hbase:meta region replica
+    // replication, see #createCatalogReplicationSource().
+    WALFileLengthProvider walFileLengthProvider = this.walFactory.getWALProvider() != null
+      ? this.walFactory.getWALProvider().getWALFileLengthProvider()
+      : p -> OptionalLong.empty();
+    LOG.debug("Failure Recovery, src class name is {}", src.getClass().getName());
+    LOG.debug("Failure Recovery, walFileLengthProvider class name is {}", walFileLengthProvider.getClass().getName());
     src.init(conf, fs, this, queueStorage, replicationPeer, server, queueId, clusterId,
       walFileLengthProvider, new MetricsSource(queueId));
     return src;
@@ -607,7 +627,117 @@ public class ReplicationSourceManager {
     }
   }
 
+  void claimQueue$instrumentation(ServerName deadRS, String queue) {
+    // Wait a bit before transferring the queues, we may be shutting down.
+    // This sleep may not be enough in some cases.
+    try {
+      Thread.sleep(sleepBeforeFailover
+        + (long) (ThreadLocalRandom.current().nextFloat() * sleepBeforeFailover));
+    } catch (InterruptedException e) {
+      LOG.warn("Interrupted while waiting before transferring a queue.");
+      Thread.currentThread().interrupt();
+    }
+    // We try to lock that rs' queue directory
+    if (server.isStopped()) {
+      LOG.info("Not transferring queue since we are shutting down");
+      return;
+    }
+    // After claim the queues from dead region server, wewill skip to start the
+    // RecoveredReplicationSource if the peer has been removed. but there's possible that remove a
+    // peer with peerId = 2 and add a peer with peerId = 2 again during failover. So we need to get
+    // a copy of the replication peer first to decide whether we should start the
+    // RecoveredReplicationSource. If the latest peer is not the old peer, we should also skip to
+    // start the RecoveredReplicationSource, Otherwise the rs will abort (See HBASE-20475).
+    String peerId = new ReplicationQueueInfo(queue).getPeerId();
+    ReplicationPeerImpl oldPeer = replicationPeers.getPeer(peerId);
+    if (oldPeer == null) {
+      LOG.info("Not transferring queue since the replication peer {} for queue {} does not exist",
+        peerId, queue);
+      return;
+    }
+    Pair<String, SortedSet<String>> claimedQueue;
+    try {
+      LOG.debug("Failure Recovery, queueStorage classname is {}", queueStorage.getClass().getName());
+      claimedQueue = queueStorage.claimQueue(deadRS, queue, server.getServerName());
+      //print all the queue in claimedQueue
+      LOG.debug("Failure Recovery, claimedQueue is {}", claimedQueue);
+    } catch (ReplicationException e) {
+      LOG.error(
+        "ReplicationException: cannot claim dead region ({})'s " + "replication queue. Znode : ({})"
+          + " Possible solution: check if znode size exceeds jute.maxBuffer value. "
+          + " If so, increase it for both client and server side.",
+        deadRS, queueStorage.getRsNode(deadRS), e);
+      server.abort("Failed to claim queue from dead regionserver.", e);
+      return;
+    }
+    if (claimedQueue.getSecond().isEmpty()) {
+      return;
+    }
+    String queueId = claimedQueue.getFirst();
+    Set<String> walsSet = claimedQueue.getSecond();
+    ReplicationPeerImpl peer = replicationPeers.getPeer(peerId);
+    if (peer == null || peer != oldPeer) {
+      LOG.warn("Skipping failover for peer {} of node {}, peer is null", peerId, deadRS);
+      abortWhenFail(() -> queueStorage.removeQueue(server.getServerName(), queueId));
+      return;
+    }
+    if (
+      server instanceof ReplicationSyncUp.DummyServer
+        && peer.getPeerState().equals(PeerState.DISABLED)
+    ) {
+      LOG.warn(
+        "Peer {} is disabled. ReplicationSyncUp tool will skip " + "replicating data to this peer.",
+        peerId);
+      return;
+    }
+
+    ReplicationSourceInterface src;
+    try {
+      src = createSource(queueId, peer);
+    } catch (IOException e) {
+      LOG.error("Can not create replication source for peer {} and queue {}", peerId, queueId, e);
+      server.abort("Failed to create replication source after claiming queue.", e);
+      return;
+    }
+    // synchronized on oldsources to avoid adding recovered source for the to-be-removed peer
+    synchronized (oldsources) {
+      LOG.debug("Failure Recovery, src.getPeerId is {}", src.getPeerId());
+      peer = replicationPeers.getPeer(src.getPeerId());
+      if (peer == null || peer != oldPeer) {
+        src.terminate("Recovered queue doesn't belong to any current peer");
+        deleteQueue(queueId);
+        return;
+      }
+      // track sources in walsByIdRecoveredQueues
+      Map<String, NavigableSet<String>> walsByGroup = new HashMap<>();
+      walsByIdRecoveredQueues.put(queueId, walsByGroup);
+      for (String wal : walsSet) {
+        String walPrefix = AbstractFSWALProvider.getWALPrefixFromWALName(wal);
+        LOG.debug("Failure Recovery, walPrefix is {}", walPrefix);
+        NavigableSet<String> wals = walsByGroup.get(walPrefix);
+        if (wals == null) {
+          wals = new TreeSet<>();
+          walsByGroup.put(walPrefix, wals);
+        }
+        wals.add(wal);
+      }
+      oldsources.add(src);
+      LOG.info("Added source for recovered queue {}", src.getQueueId());
+      for (String wal : walsSet) {
+        LOG.trace("Enqueueing log from recovered queue for source: " + src.getQueueId());
+        LOG.debug("Failure Recovery, enqueueLog, oldLogDir is {}, wal is {}", oldLogDir, wal);
+        src.enqueueLog(new Path(oldLogDir, wal));
+      }
+      src.startup();
+    }
+  }
+
   void claimQueue(ServerName deadRS, String queue) {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to claimQueue$instrumentation");
+      claimQueue$instrumentation(deadRS,queue);
+      return;
+    }
     // Wait a bit before transferring the queues, we may be shutting down.
     // This sleep may not be enough in some cases.
     try {

@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.regionserver;
 
 import java.util.LinkedList;
 import java.util.concurrent.atomic.AtomicLong;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -137,6 +138,19 @@ public class MultiVersionConcurrencyControl {
    * @see #completeAndWait(WriteEntry)
    */
   public WriteEntry begin(Runnable action) {
+    if(TraceUtil.isDryRun()){
+      return begin$instrumentation(action);
+    }
+    synchronized (writeQueue) {
+      long nextWriteNumber = writePoint.incrementAndGet();
+      WriteEntry e = new WriteEntry(nextWriteNumber);
+      writeQueue.add(e);
+      action.run();
+      return e;
+    }
+  }
+
+  public WriteEntry begin$instrumentation(Runnable action) {
     synchronized (writeQueue) {
       long nextWriteNumber = writePoint.incrementAndGet();
       WriteEntry e = new WriteEntry(nextWriteNumber);

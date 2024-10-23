@@ -33,6 +33,7 @@ import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.regionserver.Region;
 import org.apache.hadoop.hbase.regionserver.RegionServerServices.PostOpenDeployContext;
 import org.apache.hadoop.hbase.regionserver.RegionServerServices.RegionStateTransitionContext;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.RetryCounter;
 import org.apache.hadoop.hbase.util.ServerRegionReplicaUtil;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -94,6 +95,11 @@ public class AssignRegionHandler extends EventHandler {
 
   @Override
   public void process() throws IOException {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, dryRun redirecting to process$instrumentation");
+      process$instrumentation();
+      return;
+    }
     MDC.put("pid", Long.toString(openProcId));
     HRegionServer rs = getServer();
     String encodedName = regionInfo.getEncodedName();
@@ -147,6 +153,85 @@ public class AssignRegionHandler extends EventHandler {
         }
       }
       region = HRegion.openHRegion(regionInfo, htd, rs.getWAL(regionInfo), conf, rs, null);
+    } catch (IOException e) {
+      cleanUpAndReportFailure(e);
+      return;
+    }
+    // From here on out, this is PONR. We can not revert back. The only way to address an
+    // exception from here on out is to abort the region server.
+    rs.postOpenDeployTasks(new PostOpenDeployContext(region, openProcId, masterSystemTime));
+    rs.addRegion(region);
+    LOG.info("Opened {}", regionName);
+    // Cache the open region procedure id after report region transition succeed.
+    rs.finishRegionProcedure(openProcId);
+    Boolean current = rs.getRegionsInTransitionInRS().remove(regionInfo.getEncodedNameAsBytes());
+    if (current == null) {
+      // Should NEVER happen, but let's be paranoid.
+      LOG.error("Bad state: we've just opened {} which was NOT in transition", regionName);
+    } else if (!current) {
+      // Should NEVER happen, but let's be paranoid.
+      LOG.error("Bad state: we've just opened {} which was closing", regionName);
+    }
+  }
+
+  public void process$instrumentation() throws IOException {
+    MDC.put("pid", Long.toString(openProcId));
+    HRegionServer rs = getServer();
+    String encodedName = regionInfo.getEncodedName();
+    byte[] encodedNameBytes = regionInfo.getEncodedNameAsBytes();
+    String regionName = regionInfo.getRegionNameAsString();
+    Region onlineRegion = rs.getRegion(encodedName);
+    if (onlineRegion != null) {
+      LOG.warn("Received OPEN for {} which is already online", regionName);
+      // Just follow the old behavior, do we need to call reportRegionStateTransition? Maybe not?
+      // For normal case, it could happen that the rpc call to schedule this handler is succeeded,
+      // but before returning to master the connection is broken. And when master tries again, we
+      // have already finished the opening. For this case we do not need to call
+      // reportRegionStateTransition any more.
+      return;
+    }
+    Boolean previous = rs.getRegionsInTransitionInRS().putIfAbsent(encodedNameBytes, Boolean.TRUE);
+    if (previous != null) {
+      if (previous) {
+        // The region is opening and this maybe a retry on the rpc call, it is safe to ignore it.
+        LOG.info("Receiving OPEN for {} which we are already trying to OPEN"
+          + " - ignoring this new request for this region.", regionName);
+      } else {
+        // The region is closing. This is possible as we will update the region state to CLOSED when
+        // calling reportRegionStateTransition, so the HMaster will think the region is offline,
+        // before we actually close the region, as reportRegionStateTransition is part of the
+        // closing process.
+        long backoff = retryCounter.getBackoffTimeAndIncrementAttempts();
+        LOG.info("Receiving OPEN for {} which we are trying to close, try again after {}ms",
+          regionName, backoff);
+        rs.getExecutorService().delayedSubmit(this, backoff, TimeUnit.MILLISECONDS);
+      }
+      return;
+    }
+    LOG.info("Open {}", regionName);
+    HRegion region;
+    try {
+      TableDescriptor htd =
+        tableDesc != null ? tableDesc : rs.getTableDescriptors().get(regionInfo.getTable());
+      if (htd == null) {
+        throw new IOException("Missing table descriptor for " + regionName);
+      }
+      // pass null for the last parameter, which used to be a CancelableProgressable, as now the
+      // opening can not be interrupted by a close request any more.
+      Configuration conf = rs.getConfiguration();
+      TableName tn = htd.getTableName();
+      if (ServerRegionReplicaUtil.isMetaRegionReplicaReplicationEnabled(conf, tn)) {
+        LOG.debug("Failure Recovery, region replica replication is enabled for table {}",
+          tn);
+        if (RegionReplicaUtil.isDefaultReplica(this.regionInfo.getReplicaId())) {
+          // Add the hbase:meta replication source on replica zero/default.
+          rs.getReplicationSourceService().getReplicationManager()
+            .addCatalogReplicationSource(this.regionInfo);
+        }
+      }
+      LOG.debug("Failure Recovery, opening region {}", regionName);
+      region = HRegion.openHRegion(regionInfo, htd, rs.getWAL(regionInfo), conf, rs, null);
+      LOG.debug("Failure Recovery, region opened successfully");
     } catch (IOException e) {
       cleanUpAndReportFailure(e);
       return;

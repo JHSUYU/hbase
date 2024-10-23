@@ -59,6 +59,7 @@ import org.apache.hadoop.hbase.regionserver.wal.WALUtil;
 import org.apache.hadoop.hbase.replication.HBaseReplicationEndpoint;
 import org.apache.hadoop.hbase.replication.ReplicationUtils;
 import org.apache.hadoop.hbase.replication.regionserver.ReplicationSinkManager.SinkPeer;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
@@ -455,6 +456,9 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
 
   private long parallelReplicate(CompletionService<Integer> pool, ReplicateContext replicateContext,
     List<List<Entry>> batches) throws IOException {
+    if(TraceUtil.isDryRun()){
+      return parallelReplicate$instrumentation(pool, replicateContext, batches);
+    }
     int futures = 0;
     for (int i = 0; i < batches.size(); i++) {
       List<Entry> entries = batches.get(i);
@@ -464,7 +468,56 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
             replicateContext.getSize());
         }
         // RuntimeExceptions encountered here bubble up and are handled in ReplicationSource
-        pool.submit(createReplicator(entries, i, replicateContext.getTimeout()));
+        LOG.debug("isSerial: {}", isSerial);
+        pool.submit(io.opentelemetry.context.Context.current().wrap(createReplicator(entries, i, replicateContext.getTimeout())));
+        futures++;
+      }
+    }
+
+    IOException iox = null;
+    long lastWriteTime = 0;
+    for (int i = 0; i < futures; i++) {
+      try {
+        // wait for all futures, remove successful parts
+        // (only the remaining parts will be retried)
+        Future<Integer> f = pool.take();
+        int index = f.get();
+        List<Entry> batch = batches.get(index);
+        batches.set(index, Collections.emptyList()); // remove successful batch
+        // Find the most recent write time in the batch
+        long writeTime = batch.get(batch.size() - 1).getKey().getWriteTime();
+        if (writeTime > lastWriteTime) {
+          lastWriteTime = writeTime;
+        }
+      } catch (InterruptedException ie) {
+        iox = new IOException(ie);
+      } catch (ExecutionException ee) {
+        iox = ee.getCause() instanceof IOException
+          ? (IOException) ee.getCause()
+          : new IOException(ee.getCause());
+      }
+    }
+    if (iox != null) {
+      // if we had any exceptions, try again
+      throw iox;
+    }
+    return lastWriteTime;
+  }
+
+  private long parallelReplicate$instrumentation(CompletionService<Integer> pool, ReplicateContext replicateContext,
+    List<List<Entry>> batches) throws IOException {
+    int futures = 0;
+    for (int i = 0; i < batches.size(); i++) {
+      List<Entry> entries = batches.get(i);
+      if (!entries.isEmpty()) {
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("{} Submitting {} entries of total size {}", logPeerId(), entries.size(),
+            replicateContext.getSize());
+        }
+        // RuntimeExceptions encountered here bubble up and are handled in ReplicationSource
+        LOG.debug("isSerial: {}", isSerial);
+
+        pool.submit(io.opentelemetry.context.Context.current().wrap(createReplicator(entries, i, replicateContext.getTimeout())));
         futures++;
       }
     }
@@ -504,6 +557,98 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
    */
   @Override
   public boolean replicate(ReplicateContext replicateContext) {
+    if(TraceUtil.isDryRun()){
+      return replicate$instrumentation(replicateContext);
+    }
+    CompletionService<Integer> pool = new ExecutorCompletionService<>(this.exec);
+    int sleepMultiplier = 1;
+    int initialTimeout = replicateContext.getTimeout();
+
+    if (!peersSelected && this.isRunning()) {
+      connectToPeers();
+      peersSelected = true;
+    }
+
+    int numSinks = replicationSinkMgr.getNumSinks();
+    if (numSinks == 0) {
+      if (
+        (EnvironmentEdgeManager.currentTime() - lastSinkFetchTime) >= (maxRetriesMultiplier * 1000)
+      ) {
+        LOG.warn("No replication sinks found, returning without replicating. "
+          + "The source should retry with the same set of edits. Not logging this again for "
+          + "the next {} seconds.", maxRetriesMultiplier);
+        lastSinkFetchTime = EnvironmentEdgeManager.currentTime();
+      }
+      sleepForRetries("No sinks available at peer", sleepMultiplier);
+      return false;
+    }
+
+    List<List<Entry>> batches = createBatches(replicateContext.getEntries());
+    while (this.isRunning() && !exec.isShutdown()) {
+      if (!isPeerEnabled()) {
+        if (sleepForRetries("Replication is disabled", sleepMultiplier)) {
+          sleepMultiplier++;
+        }
+        continue;
+      }
+      if (this.conn == null || this.conn.isClosed()) {
+        reconnectToPeerCluster();
+      }
+      try {
+        // replicate the batches to sink side.
+        parallelReplicate(pool, replicateContext, batches);
+        return true;
+      } catch (IOException ioe) {
+        if (ioe instanceof RemoteException) {
+          if (dropOnDeletedTables && isTableNotFoundException(ioe)) {
+            // Only filter the edits to replicate and don't change the entries in replicateContext
+            // as the upper layer rely on it.
+            batches = filterNotExistTableEdits(batches);
+            if (batches.isEmpty()) {
+              LOG.warn("After filter not exist table's edits, 0 edits to replicate, just return");
+              return true;
+            }
+          } else if (dropOnDeletedColumnFamilies && isNoSuchColumnFamilyException(ioe)) {
+            batches = filterNotExistColumnFamilyEdits(batches);
+            if (batches.isEmpty()) {
+              LOG.warn("After filter not exist column family's edits, 0 edits to replicate, "
+                + "just return");
+              return true;
+            }
+          } else {
+            LOG.warn("{} Peer encountered RemoteException, rechecking all sinks: ", logPeerId(),
+              ioe);
+            replicationSinkMgr.chooseSinks();
+          }
+        } else {
+          if (ioe instanceof SocketTimeoutException) {
+            // This exception means we waited for more than 60s and nothing
+            // happened, the cluster is alive and calling it right away
+            // even for a test just makes things worse.
+            sleepForRetries(
+              "Encountered a SocketTimeoutException. Since the "
+                + "call to the remote cluster timed out, which is usually "
+                + "caused by a machine failure or a massive slowdown",
+              this.socketTimeoutMultiplier);
+          } else if (ioe instanceof ConnectException || ioe instanceof UnknownHostException) {
+            LOG.warn("{} Peer is unavailable, rechecking all sinks: ", logPeerId(), ioe);
+            replicationSinkMgr.chooseSinks();
+          } else if (ioe instanceof CallTimeoutException) {
+            replicateContext
+              .setTimeout(ReplicationUtils.getAdaptiveTimeout(initialTimeout, sleepMultiplier));
+          } else {
+            LOG.warn("{} Can't replicate because of a local or network error: ", logPeerId(), ioe);
+          }
+        }
+        if (sleepForRetries("Since we are unable to replicate", sleepMultiplier)) {
+          sleepMultiplier++;
+        }
+      }
+    }
+    return false; // in case we exited before replicating
+  }
+
+  public boolean replicate$instrumentation(ReplicateContext replicateContext) {
     CompletionService<Integer> pool = new ExecutorCompletionService<>(this.exec);
     int sleepMultiplier = 1;
     int initialTimeout = replicateContext.getTimeout();
@@ -624,6 +769,44 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
   }
 
   protected int replicateEntries(List<Entry> entries, int batchIndex, int timeout)
+    throws IOException {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to replicateEntries$instrumentation");
+      return replicateEntries$instrumentation(entries, batchIndex, timeout);
+    }
+    SinkPeer sinkPeer = null;
+    try {
+      int entriesHashCode = System.identityHashCode(entries);
+      if (LOG.isTraceEnabled()) {
+        long size = entries.stream().mapToLong(this::getEstimatedEntrySize).sum();
+        LOG.trace("{} Replicating batch {} of {} entries with total size {} bytes to {}",
+          logPeerId(), entriesHashCode, entries.size(), size, replicationClusterId);
+      }
+      sinkPeer = replicationSinkMgr.getReplicationSink();
+      BlockingInterface rrs = sinkPeer.getRegionServer();
+      try {
+        ReplicationProtbufUtil.replicateWALEntry(rrs, entries.toArray(new Entry[entries.size()]),
+          replicationClusterId, baseNamespaceDir, hfileArchiveDir, timeout);
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("{} Completed replicating batch {}", logPeerId(), entriesHashCode);
+        }
+      } catch (IOException e) {
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("{} Failed replicating batch {}", logPeerId(), entriesHashCode, e);
+        }
+        throw e;
+      }
+      replicationSinkMgr.reportSinkSuccess(sinkPeer);
+    } catch (IOException ioe) {
+      if (sinkPeer != null) {
+        replicationSinkMgr.reportBadSink(sinkPeer);
+      }
+      throw ioe;
+    }
+    return batchIndex;
+  }
+
+  protected int replicateEntries$instrumentation(List<Entry> entries, int batchIndex, int timeout)
     throws IOException {
     SinkPeer sinkPeer = null;
     try {

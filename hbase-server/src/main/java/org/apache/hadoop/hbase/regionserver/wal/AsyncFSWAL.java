@@ -43,6 +43,7 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
+import io.opentelemetry.context.Context;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -51,6 +52,7 @@ import org.apache.hadoop.hbase.HBaseInterfaceAudience;
 import org.apache.hadoop.hbase.client.RegionInfo;
 import org.apache.hadoop.hbase.io.asyncfs.AsyncFSOutput;
 import org.apache.hadoop.hbase.io.asyncfs.monitor.StreamSlowMonitor;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.wal.AsyncFSWALProvider;
 import org.apache.hadoop.hbase.wal.WALEdit;
 import org.apache.hadoop.hbase.wal.WALKeyImpl;
@@ -558,6 +560,10 @@ public class AsyncFSWAL extends AbstractFSWAL<AsyncWriter> {
   }
 
   private void consume() {
+    if(TraceUtil.isDryRun()){
+      consume$instrumentation();
+      return;
+    }
     consumeLock.lock();
     try {
       int currentEpochAndState = epochAndState;
@@ -634,6 +640,85 @@ public class AsyncFSWAL extends AbstractFSWAL<AsyncWriter> {
     consumeExecutor.execute(consumer);
   }
 
+  private void consume$instrumentation() {
+    consumeLock.lock();
+    try {
+      int currentEpochAndState = epochAndState;
+      if (writerBroken(currentEpochAndState)) {
+        LOG.debug("Failure Recovery, AsyncFSWAL consume, writerBroken, isDryRun is " + TraceUtil.isDryRun());
+        return;
+      }
+      if (waitingRoll(currentEpochAndState)) {
+        LOG.debug("Failure Recovery, AsyncFSWAL consume, waitingRoll, isDryRun is " + TraceUtil.isDryRun());
+        if (writer.getLength() > fileLengthAtLastSync) {
+          // issue a sync
+          sync(writer);
+        } else {
+          if (unackedAppends.isEmpty()) {
+            readyForRolling = true;
+            readyForRollingCond.signalAll();
+          }
+        }
+        return;
+      }
+    } finally {
+      consumeLock.unlock();
+    }
+    long nextCursor = waitingConsumePayloadsGatingSequence.get() + 1;
+    for (long cursorBound = waitingConsumePayloads.getCursor(); nextCursor
+      <= cursorBound; nextCursor++) {
+      if (!waitingConsumePayloads.isPublished(nextCursor)) {
+        break;
+      }
+      RingBufferTruck truck = waitingConsumePayloads.get(nextCursor);
+      switch (truck.type()) {
+        case APPEND:
+          toWriteAppends.addLast(truck.unloadAppend());
+          break;
+        case SYNC:
+          syncFutures.add(truck.unloadSync());
+          break;
+        default:
+          LOG.warn("RingBufferTruck with unexpected type: " + truck.type());
+          break;
+      }
+      waitingConsumePayloadsGatingSequence.set(nextCursor);
+    }
+    appendAndSync();
+    if (hasConsumerTask.get()) {
+      return;
+    }
+    if (toWriteAppends.isEmpty()) {
+      if (waitingConsumePayloadsGatingSequence.get() == waitingConsumePayloads.getCursor()) {
+        consumerScheduled.set(false);
+        // recheck here since in append and sync we do not hold the consumeLock. Thing may
+        // happen like
+        // 1. we check cursor, no new entry
+        // 2. someone publishes a new entry to ringbuffer and the consumerScheduled is true and
+        // give up scheduling the consumer task.
+        // 3. we set consumerScheduled to false and also give up scheduling consumer task.
+        if (waitingConsumePayloadsGatingSequence.get() == waitingConsumePayloads.getCursor()) {
+          // we will give up consuming so if there are some unsynced data we need to issue a sync.
+          if (
+            writer.getLength() > fileLengthAtLastSync && !syncFutures.isEmpty()
+              && syncFutures.last().getTxid() > highestProcessedAppendTxidAtLastSync
+          ) {
+            // no new data in the ringbuffer and we have at least one sync request
+            sync(writer);
+          }
+          return;
+        } else {
+          // maybe someone has grabbed this before us
+          if (!consumerScheduled.compareAndSet(false, true)) {
+            return;
+          }
+        }
+      }
+    }
+    // reschedule if we still have something to write.
+    consumeExecutor.execute(consumer);
+  }
+
   private boolean shouldScheduleConsumer() {
     int currentEpochAndState = epochAndState;
     if (writerBroken(currentEpochAndState) || waitingRoll(currentEpochAndState)) {
@@ -645,6 +730,7 @@ public class AsyncFSWAL extends AbstractFSWAL<AsyncWriter> {
   @Override
   protected long append(RegionInfo hri, WALKeyImpl key, WALEdit edits, boolean inMemstore)
     throws IOException {
+    LOG.info("Failure Recovery, AsyncFSWAl append, isDryRun is " + TraceUtil.isDryRun());
     long txid =
       stampSequenceIdAndPublishToRingBuffer(hri, key, edits, inMemstore, waitingConsumePayloads);
     if (shouldScheduleConsumer()) {
@@ -672,6 +758,7 @@ public class AsyncFSWAL extends AbstractFSWAL<AsyncWriter> {
 
   @Override
   protected void doSync(long txid, boolean forceSync) throws IOException {
+    LOG.debug("Failure Recovery, AsyncFSWAL doSync, isDryRun is " + TraceUtil.isDryRun());
     if (highestSyncedTxid.get() >= txid) {
       return;
     }
@@ -686,7 +773,8 @@ public class AsyncFSWAL extends AbstractFSWAL<AsyncWriter> {
       waitingConsumePayloads.publish(sequence);
     }
     if (shouldScheduleConsumer()) {
-      consumeExecutor.execute(consumer);
+      LOG.debug("Failure Recovery isDryRun is " + TraceUtil.isDryRun() + " doSync execute consumer");
+      consumeExecutor.execute(Context.current().wrap(consumer));
     }
     blockOnSync(future);
   }

@@ -34,6 +34,8 @@ public class ClaimReplicationQueueCallable extends BaseRSProcedureCallable {
 
   private String queue;
 
+  public boolean isDryRun;
+
   @Override
   public EventType getEventType() {
     return EventType.RS_CLAIM_REPLICATION_QUEUE;
@@ -41,15 +43,27 @@ public class ClaimReplicationQueueCallable extends BaseRSProcedureCallable {
 
   @Override
   protected void doCall() throws Exception {
+    if(isDryRun){
+      doCall$instrumentation();
+      return;
+    }
+    PeerProcedureHandler handler = rs.getReplicationSourceService().getPeerProcedureHandler();
+    handler.claimReplicationQueue(crashedServer, queue);
+  }
+
+  protected void doCall$instrumentation() throws Exception {
     PeerProcedureHandler handler = rs.getReplicationSourceService().getPeerProcedureHandler();
     handler.claimReplicationQueue(crashedServer, queue);
   }
 
   @Override
   protected void initParameter(byte[] parameter) throws InvalidProtocolBufferException {
+    System.out.println("Failure Recovery, isDryRun is set to: " + isDryRun);
     ClaimReplicationQueueRemoteParameter param =
       ClaimReplicationQueueRemoteParameter.parseFrom(parameter);
     crashedServer = ProtobufUtil.toServerName(param.getCrashedServer());
     queue = param.getQueue();
+    isDryRun = param.getIsDryRun();
+    System.out.println("Failure Recovery, isDryRun is set to: " + isDryRun);
   }
 }

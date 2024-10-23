@@ -22,6 +22,8 @@ import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.CellComparatorImpl;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -65,6 +67,7 @@ class MutableRegionInfo implements RegionInfo {
   private final String encodedName;
   private final byte[] encodedNameAsBytes;
   private final TableName tableName;
+  public TableName tableName$dryrun;
 
   private static int generateHashCode(final TableName tableName, final byte[] startKey,
     final byte[] endKey, final long regionId, final int replicaId, boolean offLine,
@@ -183,7 +186,17 @@ class MutableRegionInfo implements RegionInfo {
    */
   @Override
   public TableName getTable() {
+    if(TraceUtil.isDryRun()){
+      return getTable$instrumentation();
+    }
     return this.tableName;
+  }
+
+  public TableName getTable$instrumentation() {
+    if(this.tableName$dryrun == null){
+      this.tableName$dryrun = DryRunManager.clone(tableName);
+    }
+    return this.tableName$dryrun;
   }
 
   /**

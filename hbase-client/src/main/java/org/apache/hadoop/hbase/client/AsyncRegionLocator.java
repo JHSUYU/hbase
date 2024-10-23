@@ -201,6 +201,9 @@ class AsyncRegionLocator {
 
   CompletableFuture<HRegionLocation> getRegionLocation(TableName tableName, byte[] row,
     RegionLocateType type, long timeoutNs) {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to getRegionLocation$instrumentation(TableName tableName, byte[] row, RegionLocateType type, long timeoutNs)");
+    }
     return getRegionLocation(tableName, row, type, false, timeoutNs);
   }
 

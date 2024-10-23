@@ -1,10 +1,19 @@
 package org.apache.hadoop.hbase.dryrun;
 
+import com.rits.cloning.Cloner;
 import org.apache.yetus.audience.InterfaceAudience;
 import java.util.*;
 import java.util.concurrent.*;
 @InterfaceAudience.Private
 public class DryRunManager {
+
+  public static <T> T deepClone(T obj){
+    if(obj == null){
+      return null;
+    }
+    return (T) new Cloner().deepClone(obj);
+  }
+
   public static <T> T clone(T obj) {
     if (obj == null) {
       return null;
@@ -29,29 +38,26 @@ public class DryRunManager {
       return null;
     }
 
-    try {
-      // Try to create a new instance of the same class
-      Set<E> newSet = original.getClass().getDeclaredConstructor().newInstance();
-      newSet.addAll(original);
-      return newSet;
-    } catch (Exception e) {
-      // If we can't create a new instance, we'll use type-specific handling
-      if (original instanceof TreeSet) {
-        return new TreeSet<>(original);
-      } else if (original instanceof LinkedHashSet) {
-        return new LinkedHashSet<>(original);
-      } else if (original instanceof ConcurrentSkipListSet) {
-        return new ConcurrentSkipListSet<>(original);
-      } else if (original instanceof CopyOnWriteArraySet) {
-        return new CopyOnWriteArraySet<>(original);
-      } else if (original instanceof HashSet) {
-        return new HashSet<>(original);
-      } else {
-        // For unknown types, including Collections.unmodifiableSet,
-        // Collections.synchronizedSet, etc., we return the original set
-        // as these are usually wrappers and don't need cloning
-        return original;
-      }
+    if (original instanceof TreeSet) {
+      TreeSet<E> originalTS = (TreeSet<E>) original;
+      TreeSet<E> newTS = new TreeSet<>(originalTS.comparator());
+      newTS.addAll(original);
+      return newTS;
+    } else if (original instanceof ConcurrentSkipListSet) {
+      ConcurrentSkipListSet<E> originalCSLS = (ConcurrentSkipListSet<E>) original;
+      ConcurrentSkipListSet<E> newCSLS = new ConcurrentSkipListSet<>(originalCSLS.comparator());
+      newCSLS.addAll(original);
+      return newCSLS;
+    } else if (original instanceof LinkedHashSet) {
+      return new LinkedHashSet<>(original);
+    } else if (original instanceof CopyOnWriteArraySet) {
+      return new CopyOnWriteArraySet<>(original);
+    } else if (original instanceof HashSet) {
+      return new HashSet<>(original);
+    } else {
+      // For unknown types, including Collections.unmodifiableSet,
+      // Collections.synchronizedSet, etc., we return a new HashSet
+      return new HashSet<>(original);
     }
   }
 
@@ -60,33 +66,28 @@ public class DryRunManager {
       return null;
     }
 
-    try {
-      // Try to create a new instance of the same class
-      Map<K, V> newMap = original.getClass().getDeclaredConstructor().newInstance();
-      newMap.putAll(original);
-      return newMap;
-    } catch (Exception e) {
-      // If we can't create a new instance, we'll use type-specific handling
-      if (original instanceof TreeMap) {
-        return new TreeMap<>(original);
-      } else if (original instanceof LinkedHashMap) {
-        return new LinkedHashMap<>(original);
-      } else if (original instanceof ConcurrentHashMap) {
-        return new ConcurrentHashMap<>(original);
-      } else if (original instanceof ConcurrentSkipListMap) {
-        ConcurrentSkipListMap<K, V> originalCSLM = (ConcurrentSkipListMap<K, V>) original;
-        ConcurrentSkipListMap<K, V> newCSLM = new ConcurrentSkipListMap<>(originalCSLM.comparator());
-        newCSLM.putAll(original);
-        return newCSLM;
-      } else if (original instanceof IdentityHashMap) {
-        return new IdentityHashMap<>(original);
-      } else if (original instanceof WeakHashMap) {
-        return new WeakHashMap<>(original);
-      } else {
-        // For unknown types, including Collections.unmodifiableMap,
-        // Collections.synchronizedMap, etc., we use HashMap
-        return new HashMap<>(original);
+    if (original instanceof TreeMap) {
+      return new TreeMap<>(original);
+    } else if (original instanceof LinkedHashMap) {
+      return new LinkedHashMap<>(original);
+    } else if (original instanceof ConcurrentHashMap) {
+      return new ConcurrentHashMap<>(original);
+    } else if (original instanceof ConcurrentSkipListMap) {
+      ConcurrentSkipListMap<K, V> originalCSLM = (ConcurrentSkipListMap<K, V>) original;
+      ConcurrentSkipListMap<K, V> newCSLM = new ConcurrentSkipListMap<>(originalCSLM.comparator());
+      for (Map.Entry<K, V> entry : original.entrySet()) {
+        newCSLM.put(entry.getKey(), entry.getValue());
       }
+      return newCSLM;
+    } else if (original instanceof IdentityHashMap) {
+      return new IdentityHashMap<>(original);
+    } else if (original instanceof WeakHashMap) {
+      return new WeakHashMap<>(original);
+    } else {
+      System.out.println("Failure Recovery: DryRunManager.java: cloneMap: unknown type");
+      // For unknown types, including Collections.unmodifiableMap,
+      // Collections.synchronizedMap, etc., we use HashMap
+      return new HashMap<>(original);
     }
   }
 

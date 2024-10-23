@@ -597,6 +597,7 @@ message ClaimReplicationQueueRemoteStateData {
 message ClaimReplicationQueueRemoteParameter {
   required ServerName crashed_server = 1;
   required string queue = 2;
+  optional bool is_dry_run = 3 [default = false];
 }
 
 enum ClaimReplicationQueuesState {

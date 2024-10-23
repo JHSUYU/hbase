@@ -1122,6 +1122,47 @@ public abstract class AbstractFSWAL<W extends WriterBase> implements WAL {
 
   protected final boolean appendEntry(W writer, FSWALEntry entry) throws IOException {
     // TODO: WORK ON MAKING THIS APPEND FASTER. DOING WAY TOO MUCH WORK WITH CPs, PBing, etc.
+    if(TraceUtil.isDryRun()){
+      return appendEntry$instrumentation(writer, entry);
+    }
+    atHeadOfRingBufferEventHandlerAppend();
+    long start = EnvironmentEdgeManager.currentTime();
+    byte[] encodedRegionName = entry.getKey().getEncodedRegionName();
+    long regionSequenceId = entry.getKey().getSequenceId();
+
+    // Edits are empty, there is nothing to append. Maybe empty when we are looking for a
+    // region sequence id only, a region edit/sequence id that is not associated with an actual
+    // edit. It has to go through all the rigmarole to be sure we have the right ordering.
+    if (entry.getEdit().isEmpty()) {
+      return false;
+    }
+
+    // Coprocessor hook.
+    coprocessorHost.preWALWrite(entry.getRegionInfo(), entry.getKey(), entry.getEdit());
+    if (!listeners.isEmpty()) {
+      for (WALActionsListener i : listeners) {
+        i.visitLogEntryBeforeWrite(entry.getRegionInfo(), entry.getKey(), entry.getEdit());
+      }
+    }
+    doAppend(writer, entry);
+    assert highestUnsyncedTxid < entry.getTxid();
+    highestUnsyncedTxid = entry.getTxid();
+    if (entry.isCloseRegion()) {
+      // let's clean all the records of this region
+      sequenceIdAccounting.onRegionClose(encodedRegionName);
+    } else {
+      sequenceIdAccounting.update(encodedRegionName, entry.getFamilyNames(), regionSequenceId,
+        entry.isInMemStore());
+    }
+    coprocessorHost.postWALWrite(entry.getRegionInfo(), entry.getKey(), entry.getEdit());
+    // Update metrics.
+    postAppend(entry, EnvironmentEdgeManager.currentTime() - start);
+    numEntries.incrementAndGet();
+    return true;
+  }
+
+  protected final boolean appendEntry$instrumentation(W writer, FSWALEntry entry) throws IOException {
+    // TODO: WORK ON MAKING THIS APPEND FASTER. DOING WAY TOO MUCH WORK WITH CPs, PBing, etc.
     atHeadOfRingBufferEventHandlerAppend();
     long start = EnvironmentEdgeManager.currentTime();
     byte[] encodedRegionName = entry.getKey().getEncodedRegionName();
@@ -1199,6 +1240,9 @@ public abstract class AbstractFSWAL<W extends WriterBase> implements WAL {
 
   protected final long stampSequenceIdAndPublishToRingBuffer(RegionInfo hri, WALKeyImpl key,
     WALEdit edits, boolean inMemstore, RingBuffer<RingBufferTruck> ringBuffer) throws IOException {
+    if(TraceUtil.isDryRun()){
+      return stampSequenceIdAndPublishToRingBuffer$instrumentation(hri, key, edits, inMemstore, ringBuffer);
+    }
     if (this.closed) {
       throw new IOException(
         "Cannot append; log is closed, regionName = " + hri.getRegionNameAsString());
@@ -1207,6 +1251,30 @@ public abstract class AbstractFSWAL<W extends WriterBase> implements WAL {
     MultiVersionConcurrencyControl.WriteEntry we = key.getMvcc().begin(() -> {
       txidHolder.setValue(ringBuffer.next());
     });
+    long txid = txidHolder.longValue();
+    ServerCall<?> rpcCall = RpcServer.getCurrentCall().filter(c -> c instanceof ServerCall)
+      .filter(c -> c.getCellScanner() != null).map(c -> (ServerCall) c).orElse(null);
+    try {
+      FSWALEntry entry = new FSWALEntry(txid, key, edits, hri, inMemstore, rpcCall);
+      entry.stampRegionSequenceId(we);
+      ringBuffer.get(txid).load(entry);
+    } finally {
+      ringBuffer.publish(txid);
+    }
+    return txid;
+  }
+
+  protected final long stampSequenceIdAndPublishToRingBuffer$instrumentation(RegionInfo hri, WALKeyImpl key,
+    WALEdit edits, boolean inMemstore, RingBuffer<RingBufferTruck> ringBuffer) throws IOException {
+    if (this.closed) {
+      throw new IOException(
+        "Cannot append; log is closed, regionName = " + hri.getRegionNameAsString());
+    }
+    MutableLong txidHolder = new MutableLong();
+    MultiVersionConcurrencyControl.WriteEntry we = key.getMvcc().begin(() -> {
+      txidHolder.setValue(ringBuffer.next());
+    });
+    LOG.debug("Failure Recovery, ringBuffer.next() successfully");
     long txid = txidHolder.longValue();
     ServerCall<?> rpcCall = RpcServer.getCurrentCall().filter(c -> c instanceof ServerCall)
       .filter(c -> c.getCellScanner() != null).map(c -> (ServerCall) c).orElse(null);

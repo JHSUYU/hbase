@@ -88,6 +88,7 @@ import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.TableDescriptor;
 import org.apache.hadoop.hbase.client.VersionInfoUtil;
 import org.apache.hadoop.hbase.conf.ConfigurationObserver;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.exceptions.FailedSanityCheckException;
 import org.apache.hadoop.hbase.exceptions.OutOfOrderScannerNextException;
 import org.apache.hadoop.hbase.exceptions.ScannerResetException;
@@ -349,6 +350,7 @@ public class RSRpcServices
   final InetSocketAddress isa;
 
   protected final HRegionServer regionServer;
+  public HRegionServer regionServer$dryrun;
   private final long maxScannerResultSize;
 
   // The reference to the priority extraction function
@@ -2308,6 +2310,36 @@ public class RSRpcServices
   @QosPriority(priority = HConstants.REPLICATION_QOS)
   public ReplicateWALEntryResponse replicateWALEntry(final RpcController controller,
     final ReplicateWALEntryRequest request) throws ServiceException {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to replicateWALEntry$instrumentation");
+      return replicateWALEntry$instrumentation(controller, request);
+    }
+    try {
+      checkOpen();
+      if (regionServer.getReplicationSinkService() != null) {
+        requestCount.increment();
+        List<WALEntry> entries = request.getEntryList();
+        CellScanner cellScanner = ((HBaseRpcController) controller).cellScanner();
+        ((HBaseRpcController) controller).setCellScanner(null);
+        regionServer.getRegionServerCoprocessorHost().preReplicateLogEntries();
+        regionServer.getReplicationSinkService().replicateLogEntries(entries, cellScanner,
+          request.getReplicationClusterId(), request.getSourceBaseNamespaceDirPath(),
+          request.getSourceHFileArchiveDirPath());
+        regionServer.getRegionServerCoprocessorHost().postReplicateLogEntries();
+        return ReplicateWALEntryResponse.newBuilder().build();
+      } else {
+        throw new ServiceException("Replication services are not initialized yet");
+      }
+    } catch (IOException ie) {
+      throw new ServiceException(ie);
+    }
+  }
+
+  public ReplicateWALEntryResponse replicateWALEntry$instrumentation(final RpcController controller,
+    final ReplicateWALEntryRequest request) throws ServiceException {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to replicateWALEntry$instrumentation");
+    }
     try {
       checkOpen();
       if (regionServer.getReplicationSinkService() != null) {
@@ -2728,6 +2760,10 @@ public class RSRpcServices
   @Override
   public MultiResponse multi(final RpcController rpcc, final MultiRequest request)
     throws ServiceException {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to multi$instrumentation");
+      return multi$instrumentation(rpcc, request);
+    }
     try {
       checkOpen();
     } catch (IOException ie) {
@@ -2885,6 +2921,205 @@ public class RSRpcServices
             regionActionResultBuilder.setException(ResponseConverter.buildException(e));
           }
         } else {
+          // doNonAtomicRegionMutation manages the exception internally
+          if (context != null && closeCallBack == null) {
+            // An RpcCallBack that creates a list of scanners that needs to perform callBack
+            // operation on completion of multiGets.
+            // Set this only once
+            closeCallBack = new RegionScannersCloseCallBack();
+            context.setCallBack(closeCallBack);
+          }
+          cellsToReturn = doNonAtomicRegionMutation(region, quota, regionAction, cellScanner,
+            regionActionResultBuilder, cellsToReturn, nonceGroup, closeCallBack, context,
+            spaceQuotaEnforcement);
+        }
+      } finally {
+        quota.close();
+      }
+
+      responseBuilder.addRegionActionResult(regionActionResultBuilder.build());
+      ClientProtos.RegionLoadStats regionLoadStats = region.getLoadStatistics();
+      if (regionLoadStats != null) {
+        regionStats.put(regionSpecifier, regionLoadStats);
+      }
+    }
+    // Load the controller with the Cells to return.
+    if (cellsToReturn != null && !cellsToReturn.isEmpty() && controller != null) {
+      controller.setCellScanner(CellUtil.createCellScanner(cellsToReturn));
+    }
+
+    MultiRegionLoadStats.Builder builder = MultiRegionLoadStats.newBuilder();
+    for (Entry<RegionSpecifier, ClientProtos.RegionLoadStats> stat : regionStats.entrySet()) {
+      builder.addRegion(stat.getKey());
+      builder.addStat(stat.getValue());
+    }
+    responseBuilder.setRegionStatistics(builder);
+    return responseBuilder.build();
+  }
+
+  public MultiResponse multi$instrumentation(final RpcController rpcc, final MultiRequest request)
+    throws ServiceException {
+    try {
+      checkOpen();
+    } catch (IOException ie) {
+      throw new ServiceException(ie);
+    }
+
+    checkBatchSizeAndLogLargeSize(request);
+
+    // rpc controller is how we bring in data via the back door; it is unprotobuf'ed data.
+    // It is also the conduit via which we pass back data.
+    HBaseRpcController controller = (HBaseRpcController) rpcc;
+    CellScanner cellScanner = controller != null ? controller.cellScanner() : null;
+    if (controller != null) {
+      controller.setCellScanner(null);
+    }
+
+    long nonceGroup = request.hasNonceGroup() ? request.getNonceGroup() : HConstants.NO_NONCE;
+
+    MultiResponse.Builder responseBuilder = MultiResponse.newBuilder();
+    RegionActionResult.Builder regionActionResultBuilder = RegionActionResult.newBuilder();
+    this.rpcMultiRequestCount.increment();
+    this.requestCount.increment();
+    ActivePolicyEnforcement spaceQuotaEnforcement = getSpaceQuotaManager().getActiveEnforcements();
+
+    // We no longer use MultiRequest#condition. Instead, we use RegionAction#condition. The
+    // following logic is for backward compatibility as old clients still use
+    // MultiRequest#condition in case of checkAndMutate with RowMutations.
+    if (request.hasCondition()) {
+      if (request.getRegionActionList().isEmpty()) {
+        // If the region action list is empty, do nothing.
+        responseBuilder.setProcessed(true);
+        return responseBuilder.build();
+      }
+
+      RegionAction regionAction = request.getRegionAction(0);
+
+      // When request.hasCondition() is true, regionAction.getAtomic() should be always true. So
+      // we can assume regionAction.getAtomic() is true here.
+      assert regionAction.getAtomic();
+
+      OperationQuota quota;
+      HRegion region;
+      RegionSpecifier regionSpecifier = regionAction.getRegion();
+
+      try {
+        region = getRegion(regionSpecifier);
+        quota = getRpcQuotaManager().checkQuota(region, regionAction.getActionList());
+      } catch (IOException e) {
+        failRegionAction(responseBuilder, regionActionResultBuilder, regionAction, cellScanner, e);
+        return responseBuilder.build();
+      }
+
+      try {
+        LOG.debug("Failure Recovery, regionAction.hasCondition() line3015 is true");
+        CheckAndMutateResult result = checkAndMutate(region, regionAction.getActionList(),
+          cellScanner, request.getCondition(), nonceGroup, spaceQuotaEnforcement);
+        responseBuilder.setProcessed(result.isSuccess());
+        ClientProtos.ResultOrException.Builder resultOrExceptionOrBuilder =
+          ClientProtos.ResultOrException.newBuilder();
+        for (int i = 0; i < regionAction.getActionCount(); i++) {
+          // To unify the response format with doNonAtomicRegionMutation and read through
+          // client's AsyncProcess we have to add an empty result instance per operation
+          resultOrExceptionOrBuilder.clear();
+          resultOrExceptionOrBuilder.setIndex(i);
+          regionActionResultBuilder.addResultOrException(resultOrExceptionOrBuilder.build());
+        }
+      } catch (IOException e) {
+        rpcServer.getMetrics().exception(e);
+        // As it's an atomic operation with a condition, we may expect it's a global failure.
+        regionActionResultBuilder.setException(ResponseConverter.buildException(e));
+      } finally {
+        quota.close();
+      }
+
+      responseBuilder.addRegionActionResult(regionActionResultBuilder.build());
+      ClientProtos.RegionLoadStats regionLoadStats = region.getLoadStatistics();
+      if (regionLoadStats != null) {
+        responseBuilder.setRegionStatistics(MultiRegionLoadStats.newBuilder()
+          .addRegion(regionSpecifier).addStat(regionLoadStats).build());
+      }
+      return responseBuilder.build();
+    }
+
+    // this will contain all the cells that we need to return. It's created later, if needed.
+    List<CellScannable> cellsToReturn = null;
+    RegionScannersCloseCallBack closeCallBack = null;
+    RpcCallContext context = RpcServer.getCurrentCall().orElse(null);
+    Map<RegionSpecifier, ClientProtos.RegionLoadStats> regionStats =
+      new HashMap<>(request.getRegionActionCount());
+
+    for (RegionAction regionAction : request.getRegionActionList()) {
+      OperationQuota quota;
+      HRegion region;
+      RegionSpecifier regionSpecifier = regionAction.getRegion();
+      regionActionResultBuilder.clear();
+
+      try {
+        region = getRegion(regionSpecifier);
+        quota = getRpcQuotaManager().checkQuota(region, regionAction.getActionList());
+      } catch (IOException e) {
+        failRegionAction(responseBuilder, regionActionResultBuilder, regionAction, cellScanner, e);
+        continue; // For this region it's a failure.
+      }
+
+      try {
+        if (regionAction.hasCondition()) {
+          LOG.debug("Failure Recovery, regionAction.hasCondition() is true");
+          try {
+            ClientProtos.ResultOrException.Builder resultOrExceptionOrBuilder =
+              ClientProtos.ResultOrException.newBuilder();
+            if (regionAction.getActionCount() == 1) {
+              CheckAndMutateResult result =
+                checkAndMutate(region, quota, regionAction.getAction(0).getMutation(), cellScanner,
+                  regionAction.getCondition(), nonceGroup, spaceQuotaEnforcement);
+              regionActionResultBuilder.setProcessed(result.isSuccess());
+              resultOrExceptionOrBuilder.setIndex(0);
+              if (result.getResult() != null) {
+                resultOrExceptionOrBuilder.setResult(ProtobufUtil.toResult(result.getResult()));
+              }
+              regionActionResultBuilder.addResultOrException(resultOrExceptionOrBuilder.build());
+            } else {
+              CheckAndMutateResult result = checkAndMutate(region, regionAction.getActionList(),
+                cellScanner, regionAction.getCondition(), nonceGroup, spaceQuotaEnforcement);
+              regionActionResultBuilder.setProcessed(result.isSuccess());
+              for (int i = 0; i < regionAction.getActionCount(); i++) {
+                if (i == 0 && result.getResult() != null) {
+                  // Set the result of the Increment/Append operations to the first element of the
+                  // ResultOrException list
+                  resultOrExceptionOrBuilder.setIndex(i);
+                  regionActionResultBuilder.addResultOrException(resultOrExceptionOrBuilder
+                    .setResult(ProtobufUtil.toResult(result.getResult())).build());
+                  continue;
+                }
+                // To unify the response format with doNonAtomicRegionMutation and read through
+                // client's AsyncProcess we have to add an empty result instance per operation
+                resultOrExceptionOrBuilder.clear();
+                resultOrExceptionOrBuilder.setIndex(i);
+                regionActionResultBuilder.addResultOrException(resultOrExceptionOrBuilder.build());
+              }
+            }
+          } catch (IOException e) {
+            rpcServer.getMetrics().exception(e);
+            // As it's an atomic operation with a condition, we may expect it's a global failure.
+            regionActionResultBuilder.setException(ResponseConverter.buildException(e));
+          }
+        } else if (regionAction.hasAtomic() && regionAction.getAtomic()) {
+          LOG.debug("Failure Recovery, regionAction.hasAtomic() is true");
+          try {
+            doAtomicBatchOp(regionActionResultBuilder, region, quota, regionAction.getActionList(),
+              cellScanner, nonceGroup, spaceQuotaEnforcement);
+            regionActionResultBuilder.setProcessed(true);
+            // We no longer use MultiResponse#processed. Instead, we use
+            // RegionActionResult#processed. This is for backward compatibility for old clients.
+            responseBuilder.setProcessed(true);
+          } catch (IOException e) {
+            rpcServer.getMetrics().exception(e);
+            // As it's atomic, we may expect it's a global failure.
+            regionActionResultBuilder.setException(ResponseConverter.buildException(e));
+          }
+        } else {
+          LOG.debug("Failure Recovery, regionAction.hasAtomic() is false");
           // doNonAtomicRegionMutation manages the exception internally
           if (context != null && closeCallBack == null) {
             // An RpcCallBack that creates a list of scanners that needs to perform callBack
@@ -3877,10 +4112,24 @@ public class RSRpcServices
     long masterSystemTime = request.hasMasterSystemTime() ? request.getMasterSystemTime() : -1;
     for (RegionOpenInfo regionOpenInfo : request.getOpenInfoList()) {
       boolean isDryRun = regionOpenInfo.getIsDryRun();
+      LOG.debug("Failure Recovery, executeOpenRegionProceduresisDryRun={}, regionOpenInfo={}, regionInfoList length is {}", isDryRun, regionOpenInfo, request.getOpenInfoList().size());
       if(isDryRun){
-        TraceUtil.createDryRunBaggage();
+        Thread dryRunThread = new Thread(() -> {
+          TraceUtil.createDryRunBaggage();
+          try {
+            executeOpenRegion$instrumentation(regionOpenInfo,tdCache,masterSystemTime);
+          } catch (Exception e) {
+            LOG.error("Failure Recovery, executeOpenRegionProcedures isDryRun=true, regionOpenInfo={}, failed", regionOpenInfo, e);
+          }
+        });
+        try{
+          dryRunThread.start();
+          dryRunThread.join();
+        }catch (Exception e){
+          LOG.error("Failure Recovery, executeOpenRegionProcedures dryRunThread failed", e);
+        }
+        continue;
       }
-      LOG.debug("Failure Recovery, executeOpenRegionProceduresisDryRun={}, regionOpenInfo={}", isDryRun, regionOpenInfo);
       RegionInfo regionInfo = ProtobufUtil.toRegionInfo(regionOpenInfo.getRegion());
       TableName tableName = regionInfo.getTable();
       TableDescriptor tableDesc = tdCache.get(tableName);
@@ -3908,6 +4157,41 @@ public class RSRpcServices
         regionServer.executorService.submit(AssignRegionHandler.create(regionServer, regionInfo,
           procId, tableDesc, masterSystemTime));
       }
+    }
+  }
+
+  private void executeOpenRegion$instrumentation(RegionOpenInfo regionOpenInfo, Map<TableName, TableDescriptor> tdCache, long masterSystemTime) {
+    RegionInfo regionInfo = ProtobufUtil.toRegionInfo(regionOpenInfo.getRegion());
+    LOG.debug("Failure Recovery, regionInfo className is {}", regionInfo.getClass().getName());
+    TableName tableName = regionInfo.getTable();
+    //TODO: check Map when passed in func arguments
+    TableDescriptor tableDesc = tdCache.get(tableName);
+    if(regionServer$dryrun == null){
+      regionServer$dryrun = DryRunManager.clone(regionServer);
+    }
+    if (tableDesc == null) {
+      try {
+        tableDesc = regionServer.getTableDescriptors().get(regionInfo.getTable());
+      } catch (IOException e) {
+        // Here we do not fail the whole method since we also need deal with other
+        // procedures, and we can not ignore this one, so we still schedule a
+        // AssignRegionHandler and it will report back to master if we still can not get the
+        // TableDescriptor.
+        LOG.warn("Failed to get TableDescriptor of {}, will try again in the handler",
+          regionInfo.getTable(), e);
+      }
+      if (tableDesc != null) {
+        tdCache.put(tableName, tableDesc);
+      }
+    }
+    if (regionOpenInfo.getFavoredNodesCount() > 0) {
+      regionServer$dryrun.updateRegionFavoredNodesMapping(regionInfo.getEncodedName(),
+        regionOpenInfo.getFavoredNodesList());
+    }
+    long procId = regionOpenInfo.getOpenProcId();
+    if (regionServer$dryrun.submitRegionProcedure(procId)) {
+      regionServer$dryrun.executorService.submit(AssignRegionHandler.create(regionServer$dryrun, regionInfo,
+        procId, tableDesc, masterSystemTime));
     }
   }
 
@@ -3956,7 +4240,7 @@ public class RSRpcServices
         // Avoid reading from the TableDescritor every time(usually it will read from the file
         // system)
         Map<TableName, TableDescriptor> tdCache = new HashMap<>();
-        request.getOpenRegionList().forEach(req -> executeOpenRegionProcedures(req, tdCache));
+        request.getOpenRegionList().forEach(req -> executeOpenRegionProcedures(req, DryRunManager.clone(tdCache)));
       }
       if (request.getCloseRegionCount() > 0) {
         request.getCloseRegionList().forEach(this::executeCloseRegionProcedures);

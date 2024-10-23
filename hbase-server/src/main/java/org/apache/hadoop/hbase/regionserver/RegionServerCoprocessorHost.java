@@ -159,6 +159,7 @@ public class RegionServerCoprocessorHost
   }
 
   public void preReplicateLogEntries() throws IOException {
+    LOG.debug("Failure Recovery, corprocEnvironments.isEmpty() = " + coprocEnvironments.isEmpty());
     execOperation(coprocEnvironments.isEmpty() ? null : new RegionServerObserverOperation() {
       @Override
       public void call(RegionServerObserver observer) throws IOException {

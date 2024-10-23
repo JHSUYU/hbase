@@ -712,6 +712,15 @@ class RawAsyncTableImpl implements AsyncTable<AdvancedScanResultConsumer> {
 
   @Override
   public <T> List<CompletableFuture<T>> batch(List<? extends Row> actions) {
+    if(TraceUtil.isDryRun()){
+      return batch$instrumentation(actions);
+    }
+    final Supplier<Span> supplier =
+      newTableOperationSpanBuilder().setOperation(actions).setContainerOperations(actions);
+    return tracedFutures(() -> batch(actions, rpcTimeoutNs), supplier);
+  }
+
+  public <T> List<CompletableFuture<T>> batch$instrumentation(List<? extends Row> actions) {
     final Supplier<Span> supplier =
       newTableOperationSpanBuilder().setOperation(actions).setContainerOperations(actions);
     return tracedFutures(() -> batch(actions, rpcTimeoutNs), supplier);

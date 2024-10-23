@@ -26,6 +26,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.StreamCapabilities;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.io.asyncfs.monitor.StreamSlowMonitor;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.AtomicUtils;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.CommonFSUtils.StreamLacksCapabilityException;
@@ -52,10 +53,25 @@ public class ProtobufLogWriter extends AbstractProtobufLogWriter implements FSHL
 
   @Override
   public void append(Entry entry) throws IOException {
+    if(TraceUtil.isDryRun()){
+      append$instrumentation(entry);
+      return;
+    }
     entry.getKey().getBuilder(compressor).setFollowingKvCount(entry.getEdit().size()).build()
       .writeDelimitedTo(output);
     for (Cell cell : entry.getEdit().getCells()) {
       // cellEncoder must assume little about the stream, since we write PB and cells in turn.
+      cellEncoder.write(cell);
+    }
+    length.set(output.getPos());
+  }
+
+  public void append$instrumentation(Entry entry) throws IOException {
+    entry.getKey().getBuilder(compressor).setFollowingKvCount(entry.getEdit().size()).build()
+      .writeDelimitedTo(output);
+    for (Cell cell : entry.getEdit().getCells()) {
+      // cellEncoder must assume little about the stream, since we write PB and cells in turn.
+      LOG.debug("Failure Recovery, cellEncoder class name is: " + cellEncoder.getClass().getName());
       cellEncoder.write(cell);
     }
     length.set(output.getPos());

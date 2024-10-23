@@ -36,6 +36,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
+import io.opentelemetry.context.Context;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -58,6 +59,7 @@ import org.apache.hadoop.hbase.replication.ReplicationQueueInfo;
 import org.apache.hadoop.hbase.replication.ReplicationQueueStorage;
 import org.apache.hadoop.hbase.replication.SystemTableWALEntryFilter;
 import org.apache.hadoop.hbase.replication.WALEntryFilter;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.Threads;
@@ -242,6 +244,10 @@ public class ReplicationSource implements ReplicationSourceInterface {
 
   @Override
   public void enqueueLog(Path wal) {
+    if(TraceUtil.isDryRun()){
+      enqueueLog$instrumentation(wal);
+      return;
+    }
     if (!this.filterInWALs.test(wal)) {
       LOG.trace("NOT replicating {}", wal);
       return;
@@ -255,6 +261,31 @@ public class ReplicationSource implements ReplicationSourceInterface {
         // new wal group observed after source startup, start a new worker thread to track it
         // notice: it's possible that wal enqueued when this.running is set but worker thread
         // still not launched, so it's necessary to check workerThreads before start the worker
+        LOG.debug("Failure Recovery: queue not exists, trying to start new shipper for walGroupId={} wal = {}", walPrefix, wal);
+        tryStartNewShipper(walPrefix);
+      }
+    }
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("{} Added wal {} to queue of source {}.", logPeerId(), walPrefix,
+        this.replicationQueueInfo.getQueueId());
+    }
+  }
+
+  public void enqueueLog$instrumentation(Path wal) {
+    if (!this.filterInWALs.test(wal)) {
+      LOG.trace("NOT replicating {}", wal);
+      return;
+    }
+    // Use WAL prefix as the WALGroupId for this peer.
+    String walPrefix = AbstractFSWALProvider.getWALPrefixFromWALName(wal.getName());
+    boolean queueExists = logQueue.enqueueLog(wal, walPrefix);
+
+    if (!queueExists) {
+      if (this.isSourceActive() && this.walEntryFilter != null) {
+        // new wal group observed after source startup, start a new worker thread to track it
+        // notice: it's possible that wal enqueued when this.running is set but worker thread
+        // still not launched, so it's necessary to check workerThreads before start the worker
+        LOG.debug("Failure Recovery: Trying to start new shipper for walGroupId={} wal = {}", walPrefix, wal);
         tryStartNewShipper(walPrefix);
       }
     }
@@ -284,6 +315,9 @@ public class ReplicationSource implements ReplicationSourceInterface {
 
   private ReplicationEndpoint createReplicationEndpoint()
     throws InstantiationException, IllegalAccessException, ClassNotFoundException, IOException {
+    if(TraceUtil.isDryRun()){
+      return createReplicationEndpoint$instrumentation();
+    }
     RegionServerCoprocessorHost rsServerHost = null;
     if (server instanceof HRegionServer) {
       rsServerHost = ((HRegionServer) server).getRegionServerCoprocessorHost();
@@ -326,6 +360,41 @@ public class ReplicationSource implements ReplicationSourceInterface {
     replicationEndpoint.awaitRunning(waitOnEndpointSeconds, TimeUnit.SECONDS);
   }
 
+  private ReplicationEndpoint createReplicationEndpoint$instrumentation()
+    throws InstantiationException, IllegalAccessException, ClassNotFoundException, IOException {
+    RegionServerCoprocessorHost rsServerHost = null;
+    if (server instanceof HRegionServer) {
+      rsServerHost = ((HRegionServer) server).getRegionServerCoprocessorHost();
+    }
+    String replicationEndpointImpl = replicationPeer.getPeerConfig().getReplicationEndpointImpl();
+    LOG.debug("Failure Recovery: replicationEndpointImpl is {}", replicationEndpointImpl);
+
+    ReplicationEndpoint replicationEndpoint;
+    if (replicationEndpointImpl == null) {
+      // Default to HBase inter-cluster replication endpoint; skip reflection
+      replicationEndpoint = new HBaseInterClusterReplicationEndpoint();
+    } else {
+      try {
+        replicationEndpoint = Class.forName(replicationEndpointImpl)
+          .asSubclass(ReplicationEndpoint.class).getDeclaredConstructor().newInstance();
+      } catch (NoSuchMethodException | InvocationTargetException e) {
+        throw new IllegalArgumentException(e);
+      }
+    }
+    if (rsServerHost != null) {
+      ReplicationEndpoint newReplicationEndPoint =
+        rsServerHost.postCreateReplicationEndPoint(replicationEndpoint);
+      if (newReplicationEndPoint != null) {
+        // Override the newly created endpoint from the hook with configured end point
+        replicationEndpoint = newReplicationEndPoint;
+      }
+    }
+    LOG.debug("Failure Recovery: replicationEndpoint classname is {}", replicationEndpoint.getClass().getName());
+    LOG.debug("Failure Recovery, rsServerHost is {}", rsServerHost);
+    return replicationEndpoint;
+  }
+
+
   private void initializeWALEntryFilter(UUID peerClusterId) {
     // get the WALEntryFilter from ReplicationEndpoint and add it to default filters
     List<WALEntryFilter> filters = new ArrayList<>(this.baseFilterOutWALEntries);
@@ -338,6 +407,11 @@ public class ReplicationSource implements ReplicationSourceInterface {
   }
 
   private void tryStartNewShipper(String walGroupId) {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery,redirecting to tryStartNewShipper$instrumentation");
+      tryStartNewShipper$instrumentation(walGroupId);
+      return;
+    }
     workerThreads.compute(walGroupId, (key, value) -> {
       if (value != null) {
         LOG.debug("{} preempted start of shipping worker walGroupId={}", logPeerId(), walGroupId);
@@ -349,6 +423,30 @@ public class ReplicationSource implements ReplicationSourceInterface {
           createNewWALReader(walGroupId, worker.getStartPosition());
         Threads.setDaemonThreadRunning(walReader, Thread.currentThread().getName()
           + ".replicationSource.wal-reader." + walGroupId + "," + queueId, this::retryRefreshing);
+        worker.setWALReader(walReader);
+        worker.startup(this::retryRefreshing);
+        return worker;
+      }
+    });
+  }
+
+  private void tryStartNewShipper$instrumentation(String walGroupId) {
+    workerThreads.compute(walGroupId, (key, value) -> {
+      if (value != null) {
+        LOG.debug("Failure Recovery, {} preempted start of shipping worker walGroupId={}", logPeerId(), walGroupId);
+        return value;
+      } else {
+        LOG.debug("Failure Recovery, {} starting shipping worker for walGroupId={}", logPeerId(), walGroupId);
+        ReplicationSourceShipper worker = createNewShipper(walGroupId);
+        worker.isDryRun = TraceUtil.isDryRun();
+        TraceUtil.createDryRunBaggage();
+        ReplicationSourceWALReader walReader =
+          createNewWALReader(walGroupId, worker.getStartPosition());
+        LOG.debug("Failure Recovery, replicationSourceWALReader classname is {}", walReader.getClass().getName());
+        //Context.current().wrap(worker);
+        Threads.setDaemonThreadRunning(walReader,
+          Thread.currentThread().getName() + ".replicationSource.wal-reader." + walGroupId + ","
+            + queueId, this::retryRefreshing);
         worker.setWALReader(walReader);
         worker.startup(this::retryRefreshing);
         return worker;
@@ -525,6 +623,10 @@ public class ReplicationSource implements ReplicationSourceInterface {
   }
 
   private void initialize() {
+    if(TraceUtil.isDryRun()){
+      initialize$instrumentation();
+      return;
+    }
     int sleepMultiplier = 1;
     while (this.isSourceActive()) {
       ReplicationEndpoint replicationEndpoint;
@@ -597,6 +699,80 @@ public class ReplicationSource implements ReplicationSourceInterface {
     setSourceStartupStatus(false);
   }
 
+  private void initialize$instrumentation() {
+    int sleepMultiplier = 1;
+    while (this.isSourceActive()) {
+      ReplicationEndpoint replicationEndpoint;
+      try {
+        replicationEndpoint = createReplicationEndpoint();
+      } catch (Exception e) {
+        LOG.warn("{} error creating ReplicationEndpoint, retry", logPeerId(), e);
+        if (sleepForRetries("Error creating ReplicationEndpoint", sleepMultiplier)) {
+          sleepMultiplier++;
+        }
+        continue;
+      }
+
+      try {
+        initAndStartReplicationEndpoint(replicationEndpoint);
+        this.replicationEndpoint = replicationEndpoint;
+        break;
+      } catch (Exception e) {
+        LOG.warn("{} Error starting ReplicationEndpoint, retry", logPeerId(), e);
+        replicationEndpoint.stop();
+        if (sleepForRetries("Error starting ReplicationEndpoint", sleepMultiplier)) {
+          sleepMultiplier++;
+        } else {
+          retryStartup.set(!this.abortOnError);
+          setSourceStartupStatus(false);
+          throw new RuntimeException("Exhausted retries to start replication endpoint.");
+        }
+      }
+    }
+
+    if (!this.isSourceActive()) {
+      // this means the server is shutting down or the source is terminated, just give up
+      // initializing
+      setSourceStartupStatus(false);
+      return;
+    }
+
+    sleepMultiplier = 1;
+    UUID peerClusterId;
+    // delay this until we are in an asynchronous thread
+    for (;;) {
+      peerClusterId = replicationEndpoint.getPeerUUID();
+      LOG.debug("Failure Recovery: peerClusterId is {}", peerClusterId);
+      if (this.isSourceActive() && peerClusterId == null) {
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("{} Could not connect to Peer ZK. Sleeping for {} millis", logPeerId(),
+            (this.sleepForRetries * sleepMultiplier));
+        }
+        if (sleepForRetries("Cannot contact the peer's zk ensemble", sleepMultiplier)) {
+          sleepMultiplier++;
+        }
+      } else {
+        break;
+      }
+    }
+
+    if (!this.isSourceActive()) {
+      // this means the server is shutting down or the source is terminated, just give up
+      // initializing
+      setSourceStartupStatus(false);
+      return;
+    }
+
+    LOG.info("Failure Recovery {} queueId={} (queues={}) is replicating from cluster={} to cluster={}", logPeerId(),
+      this.replicationQueueInfo.getQueueId(), logQueue.getNumQueues(), clusterId, peerClusterId);
+    initializeWALEntryFilter(peerClusterId);
+    // Start workers
+    for (String walGroupId : logQueue.getQueues().keySet()) {
+      tryStartNewShipper(walGroupId);
+    }
+    setSourceStartupStatus(false);
+  }
+
   private synchronized void setSourceStartupStatus(boolean initializing) {
     startupOngoing.set(initializing);
     if (initializing) {
@@ -608,12 +784,48 @@ public class ReplicationSource implements ReplicationSourceInterface {
 
   @Override
   public ReplicationSourceInterface startup() {
+    if(TraceUtil.isDryRun()){
+      return startup$instrumentation();
+    }
     if (this.sourceRunning) {
       return this;
     }
     this.sourceRunning = true;
     setSourceStartupStatus(true);
     initThread = new Thread(this::initialize);
+    Threads.setDaemonThreadRunning(initThread,
+      Thread.currentThread().getName() + ".replicationSource," + this.queueId, (t, e) -> {
+        // if first initialization attempt failed, and abortOnError is false, we will
+        // keep looping in this thread until initialize eventually succeeds,
+        // while the server main startup one can go on with its work.
+        sourceRunning = false;
+        checkError(t, e);
+        retryStartup.set(!this.abortOnError);
+        do {
+          if (retryStartup.get()) {
+            this.sourceRunning = true;
+            setSourceStartupStatus(true);
+            retryStartup.set(false);
+            try {
+              initialize();
+            } catch (Throwable error) {
+              setSourceStartupStatus(false);
+              checkError(t, error);
+              retryStartup.set(!this.abortOnError);
+            }
+          }
+        } while ((this.startupOngoing.get() || this.retryStartup.get()) && !this.abortOnError);
+      });
+    return this;
+  }
+
+  public ReplicationSourceInterface startup$instrumentation() {
+    if (this.sourceRunning) {
+      return this;
+    }
+    this.sourceRunning = true;
+    setSourceStartupStatus(true);
+    initThread = new Thread(Context.current().wrap(this::initialize));
     Threads.setDaemonThreadRunning(initThread,
       Thread.currentThread().getName() + ".replicationSource," + this.queueId, (t, e) -> {
         // if first initialization attempt failed, and abortOnError is false, we will

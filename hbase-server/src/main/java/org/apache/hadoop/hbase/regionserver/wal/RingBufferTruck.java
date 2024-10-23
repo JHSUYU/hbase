@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hbase.regionserver.wal;
 
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.yetus.audience.InterfaceAudience;
 
 /**
@@ -27,6 +28,8 @@ import org.apache.yetus.audience.InterfaceAudience;
  */
 @InterfaceAudience.Private
 final class RingBufferTruck {
+
+  public boolean isDryRun;
 
   public enum Type {
     APPEND,
@@ -46,6 +49,7 @@ final class RingBufferTruck {
    * Load the truck with a {@link FSWALEntry}.
    */
   void load(FSWALEntry entry) {
+    this.isDryRun = TraceUtil.isDryRun();
     this.entry = entry;
     this.type = Type.APPEND;
   }
@@ -54,6 +58,7 @@ final class RingBufferTruck {
    * Load the truck with a {@link SyncFuture}.
    */
   void load(final SyncFuture syncFuture) {
+    this.isDryRun = TraceUtil.isDryRun();
     this.sync = syncFuture;
     this.type = Type.SYNC;
   }

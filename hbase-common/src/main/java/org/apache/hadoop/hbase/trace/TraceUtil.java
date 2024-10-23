@@ -33,6 +33,7 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import org.apache.hadoop.hbase.Version;
 import org.apache.hadoop.hbase.util.FutureUtils;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -143,13 +144,44 @@ public final class TraceUtil {
    */
   public static <T> List<CompletableFuture<T>>
   tracedFutures(Supplier<List<CompletableFuture<T>>> action, Supplier<Span> spanSupplier) {
+//    if(TraceUtil.isDryRun()){
+//      return tracedFutures$instrumentation(action, spanSupplier);
+//    }
     Span span = spanSupplier.get();
-    try (Scope ignored = span.makeCurrent()) {
+    Context context = Context.current().with(span);
+    try (Scope ignored = context.makeCurrent()) {
       List<CompletableFuture<T>> futures = action.get();
       endSpan(CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])), span);
       return futures;
     }
   }
+
+  private static <T> CompletableFuture<T> wrapFutureWithContext(CompletableFuture<T> future, Context context) {
+    return future.thenApplyAsync(result -> {
+      try (Scope scope = context.makeCurrent()) {
+        return result;
+      }
+    }, runnable -> {
+      try (Scope scope = context.makeCurrent()) {
+        runnable.run();
+      }
+    });
+  }
+
+//  public static <T> List<CompletableFuture<T>>
+//  tracedFutures$instrumentation(Supplier<List<CompletableFuture<T>>> action, Supplier<Span> spanSupplier) {
+//    Span span = spanSupplier.get();
+//    Context context = Context.current().with(span);
+//    try (Scope ignored = span.makeCurrent()) {
+//      List<CompletableFuture<T>> futures = action.get();
+//      List<CompletableFuture<T>> wrappedFutures = futures.stream()
+//        .map(future -> context.wrap(future))
+//        .collect(Collectors.toList());
+//      endSpan(CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])), span);
+//      return futures;
+//    }
+//  }
+
 
   public static void setError(Span span, Throwable error) {
     span.recordException(error);

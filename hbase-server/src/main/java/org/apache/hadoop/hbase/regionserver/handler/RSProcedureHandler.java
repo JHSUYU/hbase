@@ -20,6 +20,8 @@ package org.apache.hadoop.hbase.regionserver.handler;
 import org.apache.hadoop.hbase.executor.EventHandler;
 import org.apache.hadoop.hbase.procedure2.RSProcedureCallable;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
+import org.apache.hadoop.hbase.replication.regionserver.ClaimReplicationQueueCallable;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,6 +47,9 @@ public class RSProcedureHandler extends EventHandler {
 
   @Override
   public void process() {
+    if((callable instanceof ClaimReplicationQueueCallable) && ((ClaimReplicationQueueCallable) callable).isDryRun){
+      TraceUtil.createDryRunBaggage();
+    }
     Throwable error = null;
     try {
       MDC.put("pid", Long.toString(procId));

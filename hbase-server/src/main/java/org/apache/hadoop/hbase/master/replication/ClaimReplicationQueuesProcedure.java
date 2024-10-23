@@ -59,6 +59,11 @@ public class ClaimReplicationQueuesProcedure extends Procedure<MasterProcedureEn
     this.crashedServer = crashedServer;
   }
 
+  public ClaimReplicationQueuesProcedure(ServerName crashedServer, boolean isDryRun) {
+    this.crashedServer = crashedServer;
+    this.isDryRun = isDryRun;
+  }
+
   @Override
   public ServerName getServerName() {
     return crashedServer;
@@ -77,6 +82,9 @@ public class ClaimReplicationQueuesProcedure extends Procedure<MasterProcedureEn
   @Override
   protected Procedure<MasterProcedureEnv>[] execute(MasterProcedureEnv env)
     throws ProcedureYieldException, ProcedureSuspendedException, InterruptedException {
+    if(isDryRun){
+      return execute$instrumentation(env);
+    }
     ReplicationQueueStorage storage = env.getReplicationPeerManager().getQueueStorage();
     try {
       List<String> queues = storage.getAllQueues(crashedServer);
@@ -99,6 +107,51 @@ public class ClaimReplicationQueuesProcedure extends Procedure<MasterProcedureEn
       for (int i = 0; i < procs.length; i++) {
         procs[i] = new ClaimReplicationQueueRemoteProcedure(crashedServer, queues.get(i),
           targetServers.get(i));
+      }
+      return procs;
+    } catch (ReplicationException e) {
+      if (retryCounter == null) {
+        retryCounter = ProcedureUtil.createRetryCounter(env.getMasterConfiguration());
+      }
+      long backoff = retryCounter.getBackoffTimeAndIncrementAttempts();
+      LOG.warn("Failed to claim replication queues for {}, suspend {}secs {}; {};", crashedServer,
+        backoff / 1000, e);
+      setTimeout(Math.toIntExact(backoff));
+      setState(ProcedureProtos.ProcedureState.WAITING_TIMEOUT);
+      skipPersistence();
+      throw new ProcedureSuspendedException();
+    }
+  }
+
+  protected Procedure<MasterProcedureEnv>[] execute$instrumentation(MasterProcedureEnv env)
+    throws ProcedureYieldException, ProcedureSuspendedException, InterruptedException {
+    ReplicationQueueStorage storage = env.getReplicationPeerManager().getQueueStorage();
+    try {
+      List<String> queues = storage.getAllQueues(crashedServer);
+      if (queues.isEmpty()) {
+        LOG.debug("Finish claiming replication queues for {}", crashedServer);
+        storage.removeReplicatorIfQueueIsEmpty(crashedServer);
+        // we are done
+        return null;
+      }
+      LOG.debug("There are {} replication queues need to be claimed for {}", queues.size(),
+        crashedServer);
+      //print all the queue in queues:
+      for (String queue : queues) {
+        LOG.debug("Failure Recovery, ClaimReplicationQueuesProcedure.java: execute$instrumentation: queue: " + queue);
+      }
+      List<ServerName> targetServers =
+        env.getMasterServices().getServerManager().getOnlineServersList();
+      if (targetServers.isEmpty()) {
+        throw new ReplicationException("no region server available");
+      }
+      Collections.shuffle(targetServers);
+      ClaimReplicationQueueRemoteProcedure[] procs =
+        new ClaimReplicationQueueRemoteProcedure[Math.min(queues.size(), targetServers.size())];
+      for (int i = 0; i < procs.length; i++) {
+        procs[i] = new ClaimReplicationQueueRemoteProcedure(crashedServer, queues.get(i),
+          targetServers.get(i));
+        procs[i].isDryRun = isDryRun;
       }
       return procs;
     } catch (ReplicationException e) {

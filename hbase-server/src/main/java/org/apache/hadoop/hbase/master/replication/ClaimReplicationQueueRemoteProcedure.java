@@ -49,6 +49,14 @@ public class ClaimReplicationQueueRemoteProcedure extends ServerRemoteProcedure
 
   private String queue;
 
+//  public ClaimReplicationQueueRemoteProcedure(ServerName crashedServer, String queue,
+//    ServerName targetServer, boolean isDryRun) {
+//    this.crashedServer = crashedServer;
+//    this.queue = queue;
+//    this.targetServer = targetServer;
+//    this.isDryRun = isDryRun;
+//  }
+
   public ClaimReplicationQueueRemoteProcedure() {
   }
 
@@ -64,7 +72,7 @@ public class ClaimReplicationQueueRemoteProcedure extends ServerRemoteProcedure
     assert targetServer.equals(remote);
     return Optional.of(new ServerOperation(this, getProcId(), ClaimReplicationQueueCallable.class,
       ClaimReplicationQueueRemoteParameter.newBuilder()
-        .setCrashedServer(ProtobufUtil.toServerName(crashedServer)).setQueue(queue).build()
+        .setCrashedServer(ProtobufUtil.toServerName(crashedServer)).setQueue(queue).setIsDryRun(isDryRun).build()
         .toByteArray()));
   }
 

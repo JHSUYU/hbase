@@ -76,6 +76,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import io.opentelemetry.context.Context;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -129,6 +130,7 @@ import org.apache.hadoop.hbase.conf.ConfigurationManager;
 import org.apache.hadoop.hbase.conf.PropagatingConfigurationObserver;
 import org.apache.hadoop.hbase.coprocessor.CoprocessorHost;
 import org.apache.hadoop.hbase.coprocessor.ReadOnlyConfiguration;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.errorhandling.ForeignExceptionSnare;
 import org.apache.hadoop.hbase.exceptions.FailedSanityCheckException;
 import org.apache.hadoop.hbase.exceptions.TimeoutIOException;
@@ -315,6 +317,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   protected final Map<byte[], HStore> stores =
     new ConcurrentSkipListMap<>(Bytes.BYTES_RAWCOMPARATOR);
 
+  protected Map<byte[], HStore> stores$dryrun = null;
+
   // TODO: account for each registered handler in HeapSize computation
   private Map<String, com.google.protobuf.Service> coprocessorServiceHandlers = Maps.newHashMap();
 
@@ -403,6 +407,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
    * The sequence ID that was enLongAddered when this region was opened.
    */
   private long openSeqNum = HConstants.NO_SEQNUM;
+
+  private long openSeqNum$dryrun = HConstants.NO_SEQNUM;
 
   /**
    * The default setting for whether to enable on-demand CF loading for scan requests to this
@@ -929,6 +935,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
    * @return What the next sequence (edit) id should be.
    */
   long initialize(final CancelableProgressable reporter) throws IOException {
+    if(TraceUtil.isDryRun()){
+      return initialize$instrumentation(reporter);
+    }
 
     // Refuse to open the region if there is no column family in the table
     if (htableDescriptor.getColumnFamilyCount() == 0) {
@@ -974,8 +983,169 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     }
   }
 
+  long initialize$instrumentation(final CancelableProgressable reporter) throws IOException {
+    // Refuse to open the region if there is no column family in the table
+    if (htableDescriptor.getColumnFamilyCount() == 0) {
+      throw new DoNotRetryIOException("Table " + htableDescriptor.getTableName().getNameAsString()
+        + " should have at least one column family.");
+    }
+
+    MonitoredTask status =
+      TaskMonitor.get().createStatus("Initializing region " + this, false, true);
+    long nextSeqId = -1;
+    try {
+      nextSeqId = initializeRegionInternals(reporter, status);
+      return nextSeqId;
+    } catch (IOException e) {
+      LOG.warn("Failed initialize of region= {}, starting to roll back memstore",
+        getRegionInfo().getRegionNameAsString(), e);
+      // global memstore size will be decreased when dropping memstore
+      try {
+        // drop the memory used by memstore if open region fails
+        dropMemStoreContents();
+      } catch (IOException ioE) {
+        if (conf.getBoolean(MemStoreLAB.USEMSLAB_KEY, MemStoreLAB.USEMSLAB_DEFAULT)) {
+          LOG.warn(
+            "Failed drop memstore of region= {}, "
+              + "some chunks may not released forever since MSLAB is enabled",
+            getRegionInfo().getRegionNameAsString());
+        }
+
+      }
+      throw e;
+    } finally {
+      // nextSeqid will be -1 if the initialization fails.
+      // At least it will be 0 otherwise.
+      if (nextSeqId == -1) {
+        status.abort("Exception during region " + getRegionInfo().getRegionNameAsString()
+          + " initialization.");
+      }
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Region open journal for {}:\n{}", this.getRegionInfo().getEncodedName(),
+          status.prettyPrintJournal());
+      }
+      status.cleanup();
+    }
+  }
+
+  private long initializeRegionInternals$instrumentation(final CancelableProgressable reporter,
+    final MonitoredTask status) throws IOException {
+    if (coprocessorHost != null) {
+      status.setStatus("Running coprocessor pre-open hook");
+      coprocessorHost.preOpen();
+    }
+
+    String policyName = this.conf.get(REGION_STORAGE_POLICY_KEY, DEFAULT_REGION_STORAGE_POLICY);
+    this.fs.setStoragePolicy(policyName.trim());
+
+    // Write HRI to a file in case we need to recover hbase:meta
+    // Only the primary replica should write .regioninfo
+    if (this.getRegionInfo().getReplicaId() == RegionInfo.DEFAULT_REPLICA_ID) {
+      status.setStatus("Writing region info on filesystem");
+      fs.checkRegionInfoOnFilesystem();
+    }
+
+    // Initialize all the HStores
+    status.setStatus("Initializing all the Stores");
+    long maxSeqId = initializeStores(reporter, status);
+    this.mvcc.advanceTo(maxSeqId);
+    if (!isRestoredRegion && ServerRegionReplicaUtil.shouldReplayRecoveredEdits(this)) {
+      if(this.stores$dryrun == null){
+        this.stores$dryrun = DryRunManager.clone(this.stores);
+      }
+      Collection<HStore> stores = this.stores$dryrun.values();
+      try {
+        // update the stores that we are replaying
+        stores.forEach(HStore::startReplayingFromWAL);
+        // Recover any edits if available.
+        maxSeqId =
+          Math.max(maxSeqId, replayRecoveredEditsIfAny(maxSeqIdInStores, reporter, status));
+        // Recover any hfiles if available
+        maxSeqId = Math.max(maxSeqId, loadRecoveredHFilesIfAny(stores));
+        // Make sure mvcc is up to max.
+        this.mvcc.advanceTo(maxSeqId);
+      } finally {
+        // update the stores that we are done replaying
+        stores.forEach(HStore::stopReplayingFromWAL);
+      }
+    }
+    this.lastReplayedOpenRegionSeqId = maxSeqId;
+
+    this.writestate.setReadOnly(ServerRegionReplicaUtil.isReadOnly(this));
+    this.writestate.flushRequested = false;
+    this.writestate.compacting.set(0);
+
+    if (this.writestate.writesEnabled) {
+      // Remove temporary data left over from old regions
+      status.setStatus("Cleaning up temporary data from old regions");
+      fs.cleanupTempDir();
+    }
+
+    // Initialize split policy
+    this.splitPolicy = RegionSplitPolicy.create(this, conf);
+
+    // Initialize split restriction
+    splitRestriction = RegionSplitRestriction.create(getTableDescriptor(), conf);
+
+    // Initialize flush policy
+    this.flushPolicy = FlushPolicyFactory.create(this, conf);
+
+    long lastFlushTime = EnvironmentEdgeManager.currentTime();
+    for (HStore store : stores.values()) {
+      this.lastStoreFlushTimeMap.put(store, lastFlushTime);
+    }
+
+    // Use maximum of log sequenceid or that which was found in stores
+    // (particularly if no recovered edits, seqid will be -1).
+    long nextSeqId = maxSeqId + 1;
+    if (!isRestoredRegion) {
+      // always get openSeqNum from the default replica, even if we are secondary replicas
+      long maxSeqIdFromFile = WALSplitUtil.getMaxRegionSequenceId(conf,
+        RegionReplicaUtil.getRegionInfoForDefaultReplica(getRegionInfo()), this::getFilesystem,
+        this::getWalFileSystem);
+      nextSeqId = Math.max(maxSeqId, maxSeqIdFromFile) + 1;
+      // The openSeqNum will always be increase even for read only region, as we rely on it to
+      // determine whether a region has been successfully reopened, so here we always need to update
+      // the max sequence id file.
+      if (RegionReplicaUtil.isDefaultReplica(getRegionInfo())) {
+        LOG.debug("writing seq id for {}", this.getRegionInfo().getEncodedName());
+        WALSplitUtil.writeRegionSequenceIdFile(getWalFileSystem(), getWALRegionDir(),
+          nextSeqId - 1);
+        // This means we have replayed all the recovered edits and also written out the max sequence
+        // id file, let's delete the wrong directories introduced in HBASE-20734, see HBASE-22617
+        // for more details.
+        Path wrongRegionWALDir = CommonFSUtils.getWrongWALRegionDir(conf,
+          getRegionInfo().getTable(), getRegionInfo().getEncodedName());
+        FileSystem walFs = getWalFileSystem();
+        if (walFs.exists(wrongRegionWALDir)) {
+          if (!walFs.delete(wrongRegionWALDir, true)) {
+            LOG.debug("Failed to clean up wrong region WAL directory {}", wrongRegionWALDir);
+          }
+        }
+      }
+    }
+
+    LOG.info("Opened {}; next sequenceid={}; {}, {}", this.getRegionInfo().getShortNameToLog(),
+      nextSeqId, this.splitPolicy, this.flushPolicy);
+
+    // A region can be reopened if failed a split; reset flags
+    this.closing.set(false);
+    this.closed.set(false);
+
+    if (coprocessorHost != null) {
+      status.setStatus("Running coprocessor post-open hooks");
+      coprocessorHost.postOpen();
+    }
+
+    status.markComplete("Region opened successfully");
+    return nextSeqId;
+  }
+
   private long initializeRegionInternals(final CancelableProgressable reporter,
     final MonitoredTask status) throws IOException {
+    if(TraceUtil.isDryRun()){
+      return initializeRegionInternals$instrumentation(reporter, status);
+    }
     if (coprocessorHost != null) {
       status.setStatus("Running coprocessor pre-open hook");
       coprocessorHost.preOpen();
@@ -1090,11 +1260,17 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
    */
   private long initializeStores(CancelableProgressable reporter, MonitoredTask status)
     throws IOException {
+    if(TraceUtil.isDryRun()){
+      return initializeStores(reporter, status, false);
+    }
     return initializeStores(reporter, status, false);
   }
 
   private long initializeStores(CancelableProgressable reporter, MonitoredTask status,
     boolean warmup) throws IOException {
+    if(TraceUtil.isDryRun()){
+      return initializeStores$instrumentation(reporter, status, warmup);
+    }
     // Load in all the HStores.
     long maxSeqId = -1;
     // initialized to -1 so that we pick up MemstoreTS from column families
@@ -1124,6 +1300,84 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
           Future<HStore> future = completionService.take();
           HStore store = future.get();
           this.stores.put(store.getColumnFamilyDescriptor().getName(), store);
+          if (store.isSloppyMemStore()) {
+            hasSloppyStores = true;
+          }
+
+          long storeMaxSequenceId = store.getMaxSequenceId().orElse(0L);
+          maxSeqIdInStores.put(Bytes.toBytes(store.getColumnFamilyName()), storeMaxSequenceId);
+          if (maxSeqId == -1 || storeMaxSequenceId > maxSeqId) {
+            maxSeqId = storeMaxSequenceId;
+          }
+          long maxStoreMemstoreTS = store.getMaxMemStoreTS().orElse(0L);
+          if (maxStoreMemstoreTS > maxMemstoreTS) {
+            maxMemstoreTS = maxStoreMemstoreTS;
+          }
+        }
+        allStoresOpened = true;
+        if (hasSloppyStores) {
+          htableDescriptor = TableDescriptorBuilder.newBuilder(htableDescriptor)
+            .setFlushPolicyClassName(FlushNonSloppyStoresFirstPolicy.class.getName()).build();
+          LOG.info("Setting FlushNonSloppyStoresFirstPolicy for the region=" + this);
+        }
+      } catch (InterruptedException e) {
+        throw throwOnInterrupt(e);
+      } catch (ExecutionException e) {
+        throw new IOException(e.getCause());
+      } finally {
+        storeOpenerThreadPool.shutdownNow();
+        if (!allStoresOpened) {
+          // something went wrong, close all opened stores
+          LOG.error("Could not initialize all stores for the region=" + this);
+          for (HStore store : this.stores.values()) {
+            try {
+              store.close();
+            } catch (IOException e) {
+              LOG.warn("close store {} failed in region {}", store.toString(), this, e);
+            }
+          }
+        }
+      }
+    }
+    return Math.max(maxSeqId, maxMemstoreTS + 1);
+  }
+
+  private long initializeStores$instrumentation(CancelableProgressable reporter, MonitoredTask status,
+    boolean warmup) throws IOException {
+    // Load in all the HStores.
+    long maxSeqId = -1;
+    // initialized to -1 so that we pick up MemstoreTS from column families
+    long maxMemstoreTS = -1;
+
+    if (htableDescriptor.getColumnFamilyCount() != 0) {
+      // initialize the thread pool for opening stores in parallel.
+      ThreadPoolExecutor storeOpenerThreadPool =
+        getStoreOpenAndCloseThreadPool("StoreOpener-" + this.getRegionInfo().getShortNameToLog());
+      CompletionService<HStore> completionService =
+        new ExecutorCompletionService<>(storeOpenerThreadPool);
+
+      // initialize each store in parallel
+      for (final ColumnFamilyDescriptor family : htableDescriptor.getColumnFamilies()) {
+        status.setStatus("Instantiating store for column family " + family);
+        completionService.submit(Context.current().wrap(new Callable<HStore>() {
+          @Override
+          public HStore call() throws IOException {
+            return instantiateHStore(family, warmup);
+          }
+        }));
+      }
+      boolean allStoresOpened = false;
+      boolean hasSloppyStores = false;
+      try {
+        for (int i = 0; i < htableDescriptor.getColumnFamilyCount(); i++) {
+          Future<HStore> future = completionService.take();
+          HStore store = future.get();
+          LOG.info("Failure Recovery, this.stores$dryrun is null: {}", this.stores$dryrun == null);
+          if(this.stores$dryrun == null){
+            LOG.info("Failure Recovery, this.stores$dryrun is copied from this.stores");
+            this.stores$dryrun = DryRunManager.clone(this.stores);
+          }
+          this.stores$dryrun.put(store.getColumnFamilyDescriptor().getName(), store);
           if (store.isSloppyMemStore()) {
             hasSloppyStores = true;
           }
@@ -4427,6 +4681,40 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
    * @throws IOException if an IO problem is encountered
    */
   private OperationStatus[] batchMutate(BatchOperation<?> batchOp) throws IOException {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to batchMutate$instrumentation");
+      return batchMutate$instrumentation(batchOp);
+    }
+    boolean initialized = false;
+    batchOp.startRegionOperation();
+    try {
+      while (!batchOp.isDone()) {
+        if (!batchOp.isInReplay()) {
+          checkReadOnly();
+        }
+        checkResources();
+
+        if (!initialized) {
+          this.writeRequestsCount.add(batchOp.size());
+          // validate and prepare batch for write, for MutationBatchOperation it also calls CP
+          // prePut()/preDelete()/preIncrement()/preAppend() hooks
+          batchOp.checkAndPrepare();
+          initialized = true;
+        }
+        doMiniBatchMutate(batchOp);
+        requestFlushIfNeeded();
+      }
+    } finally {
+      if (rsServices != null && rsServices.getMetrics() != null) {
+        rsServices.getMetrics().updateWriteQueryMeter(this.htableDescriptor.getTableName(),
+          batchOp.size());
+      }
+      batchOp.closeRegionOperation();
+    }
+    return batchOp.retCodeDetails;
+  }
+
+  private OperationStatus[] batchMutate$instrumentation(BatchOperation<?> batchOp) throws IOException {
     boolean initialized = false;
     batchOp.startRegionOperation();
     try {
@@ -5107,6 +5395,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
    */
   long replayRecoveredEditsIfAny(Map<byte[], Long> maxSeqIdInStores,
     final CancelableProgressable reporter, final MonitoredTask status) throws IOException {
+    if(TraceUtil.isDryRun()){
+      return replayRecoveredEditsIfAny$instrumentation(maxSeqIdInStores, reporter, status);
+    }
     long minSeqIdForTheRegion = -1;
     for (Long maxSeqIdInStore : maxSeqIdInStores.values()) {
       if (maxSeqIdInStore < minSeqIdForTheRegion || minSeqIdForTheRegion == -1) {
@@ -5180,6 +5471,108 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         }
       }
       if (seqId > minSeqIdForTheRegion) {
+        // Then we added some edits to memory. Flush and cleanup split edit files.
+        internalFlushcache(null, seqId, stores.values(), status, false,
+          FlushLifeCycleTracker.DUMMY);
+      }
+      deleteRecoveredEdits(fs,
+        Stream.of(files).map(FileStatus::getPath).collect(Collectors.toList()));
+    }
+
+    return seqId;
+  }
+
+  long replayRecoveredEditsIfAny$instrumentation(Map<byte[], Long> maxSeqIdInStores,
+    final CancelableProgressable reporter, final MonitoredTask status) throws IOException {
+    long minSeqIdForTheRegion = -1;
+    for (Long maxSeqIdInStore : maxSeqIdInStores.values()) {
+      if (maxSeqIdInStore < minSeqIdForTheRegion || minSeqIdForTheRegion == -1) {
+        minSeqIdForTheRegion = maxSeqIdInStore;
+      }
+    }
+    long seqId = minSeqIdForTheRegion;
+    String specialRecoveredEditsDirStr = conf.get(SPECIAL_RECOVERED_EDITS_DIR);
+    LOG.debug("Failure Recovery: replayRecoveredEditsIfAny, specialRecoveredEditsDirStr: {}",
+      specialRecoveredEditsDirStr);
+    if (org.apache.commons.lang3.StringUtils.isBlank(specialRecoveredEditsDirStr)) {
+      LOG.debug("Failure Recovery: replayRecoveredEditsIfAny, specialRecoveredEditsDirStr is blank");
+      FileSystem walFS = getWalFileSystem();
+      FileSystem rootFS = getFilesystem();
+      Path wrongRegionWALDir = CommonFSUtils.getWrongWALRegionDir(conf, getRegionInfo().getTable(),
+        getRegionInfo().getEncodedName());
+      LOG.debug("Failure Recovery: replayRecoveredEditsIfAny, wrongRegionWALDir: {}", wrongRegionWALDir);
+      Path regionWALDir = getWALRegionDir();
+      LOG.debug("Failure Recovery: replayRecoveredEditsIfAny, regionWALDir: {}", regionWALDir);
+      Path regionDir =
+        FSUtils.getRegionDirFromRootDir(CommonFSUtils.getRootDir(conf), getRegionInfo());
+      LOG.debug("Failure Recovery: replayRecoveredEditsIfAny, regionDir: {}", regionDir);
+
+      // We made a mistake in HBASE-20734 so we need to do this dirty hack...
+      NavigableSet<Path> filesUnderWrongRegionWALDir =
+        WALSplitUtil.getSplitEditFilesSorted(walFS, wrongRegionWALDir);
+      //Print every path in filesUnderWrongRegionWALDir
+      for (Path path : filesUnderWrongRegionWALDir) {
+        LOG.debug("Failure Recovery: replayRecoveredEditsIfAny, filesUnderWrongRegionWALDir: {}", path);
+      }
+      seqId = Math.max(seqId, replayRecoveredEditsForPaths(minSeqIdForTheRegion, walFS,
+        filesUnderWrongRegionWALDir, reporter, regionDir));
+      // This is to ensure backwards compatability with HBASE-20723 where recovered edits can appear
+      // under the root dir even if walDir is set.
+      NavigableSet<Path> filesUnderRootDir = Collections.emptyNavigableSet();
+      if (!regionWALDir.equals(regionDir)) {
+        filesUnderRootDir = WALSplitUtil.getSplitEditFilesSorted(rootFS, regionDir);
+        seqId = Math.max(seqId, replayRecoveredEditsForPaths(minSeqIdForTheRegion, rootFS,
+          filesUnderRootDir, reporter, regionDir));
+      }
+
+      NavigableSet<Path> files = WALSplitUtil.getSplitEditFilesSorted(walFS, regionWALDir);
+      seqId = Math.max(seqId,
+        replayRecoveredEditsForPaths(minSeqIdForTheRegion, walFS, files, reporter, regionWALDir));
+      if (seqId > minSeqIdForTheRegion) {
+        if(stores$dryrun == null){
+          stores$dryrun = DryRunManager.clone(stores);
+        }
+        // Then we added some edits to memory. Flush and cleanup split edit files.
+        internalFlushcache(null, seqId, stores$dryrun.values(), status, false,
+          FlushLifeCycleTracker.DUMMY);
+      }
+      // Now delete the content of recovered edits. We're done w/ them.
+      if (files.size() > 0 && this.conf.getBoolean("hbase.region.archive.recovered.edits", false)) {
+        // For debugging data loss issues!
+        // If this flag is set, make use of the hfile archiving by making recovered.edits a fake
+        // column family. Have to fake out file type too by casting our recovered.edits as
+        // storefiles
+        String fakeFamilyName = WALSplitUtil.getRegionDirRecoveredEditsDir(regionWALDir).getName();
+        Set<HStoreFile> fakeStoreFiles = new HashSet<>(files.size());
+        for (Path file : files) {
+          fakeStoreFiles.add(new HStoreFile(walFS, file, this.conf, null, null, true));
+        }
+        getRegionWALFileSystem().archiveRecoveredEdits(fakeFamilyName, fakeStoreFiles);
+      } else {
+        deleteRecoveredEdits(walFS, Iterables.concat(files, filesUnderWrongRegionWALDir));
+        deleteRecoveredEdits(rootFS, filesUnderRootDir);
+      }
+    } else {
+      Path recoveredEditsDir = new Path(specialRecoveredEditsDirStr);
+      FileSystem fs = recoveredEditsDir.getFileSystem(conf);
+      FileStatus[] files = fs.listStatus(recoveredEditsDir);
+      LOG.debug("Found {} recovered edits file(s) under {}", files == null ? 0 : files.length,
+        recoveredEditsDir);
+      if (files != null) {
+        for (FileStatus file : files) {
+          // it is safe to trust the zero-length in this case because we've been through rename and
+          // lease recovery in the above.
+          if (isZeroLengthThenDelete(fs, file, file.getPath())) {
+            continue;
+          }
+          seqId =
+            Math.max(seqId, replayRecoveredEdits(file.getPath(), maxSeqIdInStores, reporter, fs));
+        }
+      }
+      if (seqId > minSeqIdForTheRegion) {
+        if(stores$dryrun == null){
+          stores$dryrun = DryRunManager.clone(stores);
+        }
         // Then we added some edits to memory. Flush and cleanup split edit files.
         internalFlushcache(null, seqId, stores.values(), status, false,
           FlushLifeCycleTracker.DUMMY);
@@ -5846,6 +6239,8 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       FileStatus[] files =
         WALSplitUtil.getRecoveredHFiles(fs.getFileSystem(), regionDir, familyName);
       if (files != null && files.length != 0) {
+        LOG.info("Failure Recovery isDryRun is " + TraceUtil.isDryRun()+" in loadRecoveredHFilesIfAny, found "
+          + files.length + " hfiles for family " + familyName);
         for (FileStatus file : files) {
           Path filePath = file.getPath();
           // If file length is zero then delete it
@@ -6350,6 +6745,10 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
   protected HStore instantiateHStore(final ColumnFamilyDescriptor family, boolean warmup)
     throws IOException {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to instantiateHStore$instrumentation");
+      return instantiateHStore$instrumentation(family, warmup);
+    }
     if (family.isMobEnabled()) {
       if (HFile.getFormatVersion(this.conf) < HFile.MIN_FORMAT_VERSION_WITH_TAGS) {
         throw new IOException("A minimum HFile version of " + HFile.MIN_FORMAT_VERSION_WITH_TAGS
@@ -6361,9 +6760,34 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     return new HStore(this, family, this.conf, warmup);
   }
 
+  protected HStore instantiateHStore$instrumentation(final ColumnFamilyDescriptor family, boolean warmup)
+    throws IOException {
+    if (family.isMobEnabled()) {
+      LOG.debug("Failure Recovery, redirect to HMobStore");
+      if (HFile.getFormatVersion(this.conf) < HFile.MIN_FORMAT_VERSION_WITH_TAGS) {
+        throw new IOException("A minimum HFile version of " + HFile.MIN_FORMAT_VERSION_WITH_TAGS
+          + " is required for MOB feature. Consider setting " + HFile.FORMAT_VERSION_KEY
+          + " accordingly.");
+      }
+      return new HMobStore(this, family, this.conf, warmup);
+    }
+
+    return new HStore(this, family, this.conf, warmup);
+  }
+
   @Override
   public HStore getStore(byte[] column) {
+    if(TraceUtil.isDryRun()){
+      return getStore$instrumentation(column);
+    }
     return this.stores.get(column);
+  }
+
+  public HStore getStore$instrumentation(byte[] column) {
+    if(stores$dryrun == null){
+      stores$dryrun = DryRunManager.clone(stores);
+    }
+    return this.stores$dryrun.get(column);
   }
 
   /**
@@ -6371,21 +6795,71 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
    * the list.
    */
   private HStore getStore(Cell cell) {
+    if(TraceUtil.isDryRun()){
+      return getStore$instrumentation(cell);
+    }
     return stores.entrySet().stream().filter(e -> CellUtil.matchingFamily(cell, e.getKey()))
+      .map(e -> e.getValue()).findFirst().orElse(null);
+  }
+
+  private HStore getStore$instrumentation(Cell cell) {
+    if(stores$dryrun == null){
+      stores$dryrun = DryRunManager.clone(stores);
+    }
+    return stores$dryrun.entrySet().stream().filter(e -> CellUtil.matchingFamily(cell, e.getKey()))
       .map(e -> e.getValue()).findFirst().orElse(null);
   }
 
   @Override
   public List<HStore> getStores() {
+    if(TraceUtil.isDryRun()){
+      return getStores$instrumentation();
+    }
     return new ArrayList<>(stores.values());
+  }
+
+  public List<HStore> getStores$instrumentation(){
+    if(stores$dryrun == null){
+      stores$dryrun = DryRunManager.clone(stores);
+    }
+    return new ArrayList<>(this.stores$dryrun.values());
   }
 
   @Override
   public List<String> getStoreFileList(byte[][] columns) throws IllegalArgumentException {
+    if(TraceUtil.isDryRun()){
+      return getStoreFileList$instrumentation(columns);
+    }
     List<String> storeFileNames = new ArrayList<>();
     synchronized (closeLock) {
       for (byte[] column : columns) {
         HStore store = this.stores.get(column);
+        if (store == null) {
+          throw new IllegalArgumentException(
+            "No column family : " + new String(column, StandardCharsets.UTF_8) + " available");
+        }
+        Collection<HStoreFile> storeFiles = store.getStorefiles();
+        if (storeFiles == null) {
+          continue;
+        }
+        for (HStoreFile storeFile : storeFiles) {
+          storeFileNames.add(storeFile.getPath().toString());
+        }
+
+        logRegionFiles();
+      }
+    }
+    return storeFileNames;
+  }
+
+  public List<String> getStoreFileList$instrumentation(byte[][] columns) throws IllegalArgumentException {
+    List<String> storeFileNames = new ArrayList<>();
+    synchronized (closeLock) {
+      for (byte[] column : columns) {
+        if(stores$dryrun == null){
+          stores$dryrun = DryRunManager.clone(stores);
+        }
+        HStore store = this.stores$dryrun.get(column);
         if (store == null) {
           throw new IllegalArgumentException(
             "No column family : " + new String(column, StandardCharsets.UTF_8) + " available");
@@ -7215,6 +7689,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
    * @return Returns <code>this</code>
    */
   private HRegion openHRegion(final CancelableProgressable reporter) throws IOException {
+    if(TraceUtil.isDryRun()){
+      return openHRegion$instrumentation(reporter);
+    }
     try {
       CompoundConfiguration cConfig =
         new CompoundConfiguration().add(conf).addBytesMap(htableDescriptor.getValues());
@@ -7236,6 +7713,48 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         wal != null && getRegionServerServices() != null
           && RegionReplicaUtil.isDefaultReplica(getRegionInfo())
       ) {
+        writeRegionOpenMarker(wal, openSeqNum);
+      }
+    } catch (Throwable t) {
+      // By coprocessor path wrong region will open failed,
+      // MetricsRegionWrapperImpl is already init and not close,
+      // add region close when open failed
+      try {
+        // It is not required to write sequence id file when region open is failed.
+        // Passing true to skip the sequence id file write.
+        this.close(true);
+      } catch (Throwable e) {
+        LOG.warn("Open region: {} failed. Try close region but got exception ",
+          this.getRegionInfo(), e);
+      }
+      throw t;
+    }
+    return this;
+  }
+
+  private HRegion openHRegion$instrumentation(final CancelableProgressable reporter) throws IOException {
+    try {
+      CompoundConfiguration cConfig =
+        new CompoundConfiguration().add(conf).addBytesMap(htableDescriptor.getValues());
+      // Refuse to open the region if we are missing local compression support
+      TableDescriptorChecker.checkCompression(cConfig, htableDescriptor);
+      // Refuse to open the region if encryption configuration is incorrect or
+      // codec support is missing
+      LOG.debug("checking encryption for " + this.getRegionInfo().getEncodedName());
+      TableDescriptorChecker.checkEncryption(cConfig, htableDescriptor);
+      // Refuse to open the region if a required class cannot be loaded
+      LOG.debug("checking classloading for " + this.getRegionInfo().getEncodedName());
+      TableDescriptorChecker.checkClassLoading(cConfig, htableDescriptor);
+      this.openSeqNum = initialize(reporter);
+      this.mvcc.advanceTo(openSeqNum);
+      // The openSeqNum must be increased every time when a region is assigned, as we rely on it to
+      // determine whether a region has been successfully reopened. So here we always write open
+      // marker, even if the table is read only.
+      if (
+        wal != null && getRegionServerServices() != null
+          && RegionReplicaUtil.isDefaultReplica(getRegionInfo())
+      ) {
+        LOG.debug("Failure Recovery, writing region open marker to WAL");
         writeRegionOpenMarker(wal, openSeqNum);
       }
     } catch (Throwable t) {
@@ -7774,6 +8293,9 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   /** Returns writeEntry associated with this append */
   private WriteEntry doWALAppend(WALEdit walEdit, Durability durability, List<UUID> clusterIds,
     long now, long nonceGroup, long nonce, long origLogSeqNum) throws IOException {
+    if(TraceUtil.isDryRun()){
+      return doWALAppend$instrumentation(walEdit, durability, clusterIds, now, nonceGroup, nonce, origLogSeqNum);
+    }
     Preconditions.checkArgument(walEdit != null && !walEdit.isEmpty(), "WALEdit is null or empty!");
     Preconditions.checkArgument(!walEdit.isReplay() || origLogSeqNum != SequenceId.NO_SEQUENCE_ID,
       "Invalid replay sequence Id for replay WALEdit!");
@@ -7797,6 +8319,47 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     }
     WriteEntry writeEntry = null;
     try {
+      long txid = this.wal.appendData(this.getRegionInfo(), walKey, walEdit);
+      // Call sync on our edit.
+      if (txid != 0) {
+        sync(txid, durability);
+      }
+      writeEntry = walKey.getWriteEntry();
+    } catch (IOException ioe) {
+      if (walKey != null && walKey.getWriteEntry() != null) {
+        mvcc.complete(walKey.getWriteEntry());
+      }
+      throw ioe;
+    }
+    return writeEntry;
+  }
+
+  private WriteEntry doWALAppend$instrumentation(WALEdit walEdit, Durability durability, List<UUID> clusterIds,
+    long now, long nonceGroup, long nonce, long origLogSeqNum) throws IOException {
+    Preconditions.checkArgument(walEdit != null && !walEdit.isEmpty(), "WALEdit is null or empty!");
+    Preconditions.checkArgument(!walEdit.isReplay() || origLogSeqNum != SequenceId.NO_SEQUENCE_ID,
+      "Invalid replay sequence Id for replay WALEdit!");
+    // Using default cluster id, as this can only happen in the originating cluster.
+    // A slave cluster receives the final value (not the delta) as a Put. We use HLogKey
+    // here instead of WALKeyImpl directly to support legacy coprocessors.
+    WALKeyImpl walKey = walEdit.isReplay()
+      ? new WALKeyImpl(this.getRegionInfo().getEncodedNameAsBytes(),
+      this.htableDescriptor.getTableName(), SequenceId.NO_SEQUENCE_ID, now, clusterIds,
+      nonceGroup, nonce, mvcc)
+      : new WALKeyImpl(this.getRegionInfo().getEncodedNameAsBytes(),
+      this.htableDescriptor.getTableName(), SequenceId.NO_SEQUENCE_ID, now, clusterIds,
+      nonceGroup, nonce, mvcc, this.getReplicationScope());
+    if (walEdit.isReplay()) {
+      walKey.setOrigLogSeqNum(origLogSeqNum);
+    }
+    // don't call the coproc hook for writes to the WAL caused by
+    // system lifecycle events like flushes or compactions
+    if (this.coprocessorHost != null && !walEdit.isMetaEdit()) {
+      this.coprocessorHost.preWALAppend(walKey, walEdit);
+    }
+    WriteEntry writeEntry = null;
+    try {
+      LOG.debug("Failure Recovery, this.wal.classname is " + this.wal.getClass().getName());
       long txid = this.wal.appendData(this.getRegionInfo(), walKey, walEdit);
       // Call sync on our edit.
       if (txid != 0) {
