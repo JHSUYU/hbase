@@ -1862,6 +1862,7 @@ public class ProcedureExecutor<TEnvironment> {
           timeoutExecutor.add(procedure);
         } else if (!suspended) {
           // No subtask, so we are done
+          LOG.info("FL, procedure is done: {}", procedure);
           procedure.setState(ProcedureState.SUCCESS);
         }
       }

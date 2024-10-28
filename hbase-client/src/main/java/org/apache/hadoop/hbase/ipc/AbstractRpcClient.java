@@ -593,8 +593,8 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
     @Override
     public Message callBlockingMethod(Descriptors.MethodDescriptor md, RpcController controller,
       Message param, Message returnType) throws ServiceException {
-      LOG.debug("Failure Recovery, md: {}, param: {}, returnType: {}, isDryRun: {}", md.getName(), param,
-        returnType, TraceUtil.isDryRun());
+//      LOG.debug("Failure Recovery, md: {}, param: {}, returnType: {}, isDryRun: {}", md.getName(), param,
+//        returnType, TraceUtil.isDryRun());
       return rpcClient.callBlockingMethod(md, configureRpcController(controller), param, returnType,
         ticket, addr);
     }

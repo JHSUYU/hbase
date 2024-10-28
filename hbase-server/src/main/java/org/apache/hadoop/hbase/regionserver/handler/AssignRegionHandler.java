@@ -190,6 +190,7 @@ public class AssignRegionHandler extends EventHandler {
       // reportRegionStateTransition any more.
       return;
     }
+    LOG.debug("Failure Recovery, opening region {}", regionName);
     Boolean previous = rs.getRegionsInTransitionInRS().putIfAbsent(encodedNameBytes, Boolean.TRUE);
     if (previous != null) {
       if (previous) {
@@ -236,6 +237,7 @@ public class AssignRegionHandler extends EventHandler {
       cleanUpAndReportFailure(e);
       return;
     }
+    LOG.debug("Failure Recovery, post open deploy tasks");
     // From here on out, this is PONR. We can not revert back. The only way to address an
     // exception from here on out is to abort the region server.
     rs.postOpenDeployTasks(new PostOpenDeployContext(region, openProcId, masterSystemTime));

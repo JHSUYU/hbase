@@ -572,6 +572,7 @@ public class FSHLog extends AbstractFSWAL<Writer> {
       // the meta table when succesful (i.e. sync), closing handlers -- etc. These are usually
       // much fewer in number than the user-space handlers so Q-size should be user handlers plus
       // some space for these other handlers. Lets multiply by 3 for good-measure.
+      LOG.debug("Failure Recovery, name is " + name);
       this.syncFutures = new LinkedBlockingQueue<>(maxHandlersCount * 3);
     }
 
@@ -670,7 +671,9 @@ public class FSHLog extends AbstractFSWAL<Writer> {
             // See if we can process any syncfutures BEFORE we go sync.
             long currentHighestSyncedSequence = highestSyncedTxid.get();
             if (currentSequence < currentHighestSyncedSequence) {
+              LOG.debug("FL, before releaseSyncFuture");
               syncCount += releaseSyncFuture(sf, currentHighestSyncedSequence, null);
+              LOG.debug("FL, after releaseSyncFuture");
               // Done with the 'take'. Go around again and do a new 'take'.
               continue;
             }
@@ -812,6 +815,9 @@ public class FSHLog extends AbstractFSWAL<Writer> {
     } finally {
       this.disruptor.getRingBuffer().publish(sequence);
     }
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to publishSyncOnRingBuffer$instrumentation in publishSyncOnRingBuffer, syncFutureDoenId: " + syncFuture.doneTxid);
+    }
     return syncFuture;
   }
 
@@ -848,11 +854,28 @@ public class FSHLog extends AbstractFSWAL<Writer> {
 
   @Override
   protected void doSync(long txid, boolean forceSync) throws IOException {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to doSync$instrumentation in doSync");
+      doSync$instrumentation(txid, forceSync);
+      return;
+    }
     if (this.highestSyncedTxid.get() >= txid) {
       // Already sync'd.
       return;
     }
+    LOG.debug("Not Failure Recovery, publishSyncThenBlockOnCompletion in doSync");
     publishSyncThenBlockOnCompletion(forceSync);
+    LOG.debug("Not Failure Recovery, finish publishSyncThenBlockOnCompletion in doSync");
+  }
+
+  protected void doSync$instrumentation(long txid, boolean forceSync) throws IOException {
+    if (this.highestSyncedTxid.get() >= txid) {
+      // Already sync'd.
+      return;
+    }
+    LOG.debug("Failure Recovery, wait for publishSyncThenBlockOnCompletion in doSync");
+    publishSyncThenBlockOnCompletion(forceSync);
+    LOG.debug("Failure Recovery, finish publishSyncThenBlockOnCompletion in doSync");
   }
 
   boolean isLowReplicationRollEnabled() {
@@ -977,10 +1000,13 @@ public class FSHLog extends AbstractFSWAL<Writer> {
    */
   class RingBufferEventHandler implements EventHandler<RingBufferTruck>, LifecycleAware {
     private final SyncRunner[] syncRunners;
+    public SyncRunner[] syncRunners$dryrun;
     private final SyncFuture[] syncFutures;
+    public SyncFuture[] syncFutures$dryrun;
     // Had 'interesting' issues when this was non-volatile. On occasion, we'd not pass all
     // syncFutures to the next sync'ing thread.
     private AtomicInteger syncFuturesCount = new AtomicInteger();
+    private AtomicInteger syncFuturesCount$dryrun = new AtomicInteger();
     private volatile SafePointZigZagLatch zigzagLatch;
     /**
      * Set if we get an exception appending or syncing so that all subsequence appends and syncs on
@@ -998,11 +1024,17 @@ public class FSHLog extends AbstractFSWAL<Writer> {
      */
     private int syncRunnerIndex;
 
+    public int syncRunnerIndex$dryrun;
+
     RingBufferEventHandler(final int syncRunnerCount, final int maxBatchCount) {
       this.syncFutures = new SyncFuture[maxBatchCount];
+      this.syncFutures$dryrun = new SyncFuture[maxBatchCount];
       this.syncRunners = new SyncRunner[syncRunnerCount];
+      this.syncRunners$dryrun = new SyncRunner[syncRunnerCount];
+      LOG.debug("Failure Recovery, syncRunnerCount is {}, matBatchCount is {}", syncRunnerCount, maxBatchCount);
       for (int i = 0; i < syncRunnerCount; i++) {
         this.syncRunners[i] = new SyncRunner("sync." + i, maxBatchCount);
+        this.syncRunners$dryrun[i] = new SyncRunner("sync.dryrun." + i, maxBatchCount);
       }
     }
 
@@ -1024,11 +1056,33 @@ public class FSHLog extends AbstractFSWAL<Writer> {
       this.syncFuturesCount.set(0);
     }
 
+    private void offerDoneSyncsBackToCache$instrumentation() {
+      LOG.debug("Failure Recovery, offerDoneSyncBackToCache$instrumentation");
+      for (int i = 0; i < this.syncFuturesCount$dryrun.get(); i++) {
+        syncFutureCache.offer(syncFutures$dryrun[i]);
+      }
+      this.syncFuturesCount$dryrun.set(0);
+    }
+
     /** Returns True if outstanding sync futures still */
     private boolean isOutstandingSyncs() {
+      if(TraceUtil.isDryRun()){
+        return isOutstandingSyncs$instrumentation();
+      }
       // Look at SyncFutures in the EventHandler
       for (int i = 0; i < this.syncFuturesCount.get(); i++) {
         if (!this.syncFutures[i].isDone()) {
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    private boolean isOutstandingSyncs$instrumentation() {
+      // Look at SyncFutures in the EventHandler
+      for (int i = 0; i < this.syncFuturesCount$dryrun.get(); i++) {
+        if (!this.syncFutures$dryrun[i].isDone()) {
           return true;
         }
       }
@@ -1050,10 +1104,10 @@ public class FSHLog extends AbstractFSWAL<Writer> {
     // We can set endOfBatch in the below method if at end of our this.syncFutures array
     public void onEvent(final RingBufferTruck truck, final long sequence, boolean endOfBatch)
       throws Exception {
-//      if(truck.isDryRun){
-//        onEvent$instrumentation(truck, sequence, endOfBatch);
-//        return;
-//      }
+      if(truck.isDryRun){
+        onEvent$instrumentation(truck, sequence, endOfBatch);
+        return;
+      }
       // Appends and syncs are coming in order off the ringbuffer. We depend on this fact. We'll
       // add appends to dfsclient as they come in. Batching appends doesn't give any significant
       // benefit on measurement. Handler sync calls we will batch up. If we get an exception
@@ -1064,6 +1118,7 @@ public class FSHLog extends AbstractFSWAL<Writer> {
 
       try {
         if (truck.type() == RingBufferTruck.Type.SYNC) {
+          LOG.debug("Not Failure Recovery, unload sync in onEvent, syncFuturesCount: " + syncFuturesCount.get());
           this.syncFutures[this.syncFuturesCount.getAndIncrement()] = truck.unloadSync();
           // Force flush of syncs if we are carrying a full complement of syncFutures.
           if (this.syncFuturesCount.get() == this.syncFutures.length) {
@@ -1124,6 +1179,7 @@ public class FSHLog extends AbstractFSWAL<Writer> {
           try {
             // Below expects that the offer 'transfers' responsibility for the outstanding syncs to
             // the syncRunner. We should never get an exception in here.
+            LOG.debug("Not Failure Recovery, offer sync in onEvent, syncFuturesCount: " + syncFuturesCount.get());
             this.syncRunners[this.syncRunnerIndex].offer(sequence, this.syncFutures,
               this.syncFuturesCount.get());
           } catch (Exception e) {
@@ -1161,9 +1217,14 @@ public class FSHLog extends AbstractFSWAL<Writer> {
 
       try {
         if (truck.type() == RingBufferTruck.Type.SYNC) {
-          this.syncFutures[this.syncFuturesCount.getAndIncrement()] = truck.unloadSync();
+          LOG.debug("Failure Recovery, unload sync in onEvent, syncFuturesCount=" + this.syncFuturesCount$dryrun.get());
+          //LOG.debug("Failure Recovery, syncFuture doenId is " + truck.unloadSync().doneTxid);
+
+          this.syncFutures$dryrun[this.syncFuturesCount$dryrun.getAndIncrement()] = truck.unloadSync();
+          LOG.debug("Failure Recovery, this.syncFutures$dryrun[this.syncFuturesCount$dryrun.get()-1] is " + this.syncFutures$dryrun[this.syncFuturesCount$dryrun.get()-1]);
           // Force flush of syncs if we are carrying a full complement of syncFutures.
-          if (this.syncFuturesCount.get() == this.syncFutures.length) {
+          if (this.syncFuturesCount$dryrun.get() == this.syncFutures$dryrun.length) {
+            LOG.debug("Failure Recovery, set endOfBatch in onEvent");
             endOfBatch = true;
           }
         } else if (truck.type() == RingBufferTruck.Type.APPEND) {
@@ -1204,7 +1265,7 @@ public class FSHLog extends AbstractFSWAL<Writer> {
         if (this.exception == null) {
           // If not a batch, return to consume more events from the ring buffer before proceeding;
           // we want to get up a batch of syncs and appends before we go do a filesystem sync.
-          if (!endOfBatch || this.syncFuturesCount.get() <= 0) {
+          if (!endOfBatch || this.syncFuturesCount$dryrun.get() <= 0) {
             return;
           }
           // syncRunnerIndex is bound to the range [0, Integer.MAX_INT - 1] as follows:
@@ -1217,14 +1278,17 @@ public class FSHLog extends AbstractFSWAL<Writer> {
           // syncRunnerIndex ensuring that it can't grow without bound and overflow.
           // * note that the value after the increment must be positive, because the most it
           // could have been prior was Integer.MAX_INT - 1 and we only increment by 1.
-          this.syncRunnerIndex = (this.syncRunnerIndex + 1) % this.syncRunners.length;
+          this.syncRunnerIndex$dryrun = (this.syncRunnerIndex$dryrun + 1) % this.syncRunners$dryrun.length;
           try {
             // Below expects that the offer 'transfers' responsibility for the outstanding syncs to
             // the syncRunner. We should never get an exception in here.
-            this.syncRunners[this.syncRunnerIndex].offer(sequence, this.syncFutures,
-              this.syncFuturesCount.get());
+            LOG.debug("Failure Recovery, offer sync in onEvent$dryrun, syncFuturesCount={} sequence={}", this.syncFuturesCount$dryrun.get(), sequence);
+
+            this.syncRunners$dryrun[this.syncRunnerIndex$dryrun].offer(sequence, this.syncFutures$dryrun,
+              this.syncFuturesCount$dryrun.get());
           } catch (Exception e) {
             // Should NEVER get here.
+            LOG.debug("e is " + e);
             requestLogRoll(ERROR);
             this.exception = new DamagedWALException("Failed offering sync", e);
           }
@@ -1236,11 +1300,11 @@ public class FSHLog extends AbstractFSWAL<Writer> {
               ? this.exception
               : new DamagedWALException("On sync", this.exception));
         }
-        attainSafePoint(sequence);
+        attainSafePoint$instrumentation(sequence);
         // It is critical that we offer the futures back to the cache for reuse here after the
         // safe point is attained and all the clean up has been done. There have been
         // issues with reusing sync futures early causing WAL lockups, see HBASE-25984.
-        offerDoneSyncsBackToCache();
+        offerDoneSyncsBackToCache$instrumentation();
       } catch (Throwable t) {
         LOG.error("UNEXPECTED!!! syncFutures.length=" + this.syncFutures.length, t);
       }
@@ -1256,6 +1320,45 @@ public class FSHLog extends AbstractFSWAL<Writer> {
      * proceeding.
      */
     private void attainSafePoint(final long currentSequence) {
+//      if(TraceUtil.isDryRun()){
+//        attainSafePoint$instrumentation(currentSequence);
+//        return;
+//      }
+      if (this.zigzagLatch == null || !this.zigzagLatch.isCocked()) {
+        return;
+      }
+      // If here, another thread is waiting on us to get to safe point. Don't leave it hanging.
+      beforeWaitOnSafePoint();
+      try {
+        // Wait on outstanding syncers; wait for them to finish syncing (unless we've been
+        // shutdown or unless our latch has been thrown because we have been aborted or unless
+        // this WAL is broken and we can't get a sync/append to complete).
+        while (
+          (!this.shutdown && this.zigzagLatch.isCocked()
+            && highestSyncedTxid.get() < currentSequence &&
+            // We could be in here and all syncs are failing or failed. Check for this. Otherwise
+            // we'll just be stuck here for ever. In other words, ensure there syncs running.
+            isOutstandingSyncs())
+            // Wait for all SyncRunners to finish their work so that we can replace the writer
+            || isOutstandingSyncsFromRunners()
+        ) {
+          synchronized (this.safePointWaiter) {
+            this.safePointWaiter.wait(0, 1);
+          }
+        }
+        // Tell waiting thread we've attained safe point. Can clear this.throwable if set here
+        // because we know that next event through the ringbuffer will be going to a new WAL
+        // after we do the zigzaglatch dance.
+        this.exception = null;
+        this.zigzagLatch.safePointAttained();
+      } catch (InterruptedException e) {
+        LOG.warn("Interrupted ", e);
+        Thread.currentThread().interrupt();
+      }
+    }
+
+    private void attainSafePoint$instrumentation(final long currentSequence) {
+      LOG.debug("Failure Recovery, redirect to attainSafePoint$instrumentation, this.zigzagLatch: " + this.zigzagLatch);
       if (this.zigzagLatch == null || !this.zigzagLatch.isCocked()) {
         return;
       }
@@ -1309,6 +1412,10 @@ public class FSHLog extends AbstractFSWAL<Writer> {
       for (SyncRunner syncRunner : this.syncRunners) {
         syncRunner.start();
       }
+      for (SyncRunner syncRunner : this.syncRunners$dryrun) {
+        syncRunner.start();
+      }
+
     }
 
     @Override

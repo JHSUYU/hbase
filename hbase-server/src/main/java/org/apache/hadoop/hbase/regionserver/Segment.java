@@ -28,6 +28,7 @@ import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.io.TimeRange;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -155,9 +156,28 @@ public abstract class Segment implements MemStoreSizing {
    * @return either the given cell or its clone
    */
   public Cell maybeCloneWithAllocator(Cell cell, boolean forceCloneOfBigCell) {
+    if(TraceUtil.isDryRun()){
+      return maybeCloneWithAllocator$instrumentation(cell, forceCloneOfBigCell);
+    }
     if (this.memStoreLAB == null) {
       return cell;
     }
+
+    Cell cellFromMslab;
+    if (forceCloneOfBigCell) {
+      cellFromMslab = this.memStoreLAB.forceCopyOfBigCellInto(cell);
+    } else {
+      cellFromMslab = this.memStoreLAB.copyCellInto(cell);
+    }
+    return (cellFromMslab != null) ? cellFromMslab : cell;
+  }
+
+  public Cell maybeCloneWithAllocator$instrumentation(Cell cell, boolean forceCloneOfBigCell) {
+    if (this.memStoreLAB == null) {
+      return cell;
+    }
+
+    System.out.println("FL, this.memStoreLAB className is " + this.memStoreLAB.getClass().getName());
 
     Cell cellFromMslab;
     if (forceCloneOfBigCell) {

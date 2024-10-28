@@ -153,7 +153,9 @@ public abstract class RemoteProcedureDispatcher<TEnv, TRemote extends Comparable
    */
   public void addNode(final TRemote key) {
     assert key != null : "Tried to add a node with a null key";
+    LOG.debug("Failure Recovery: Adding node {}", key);
     nodeMap.computeIfAbsent(key, k -> new BufferNode(k));
+    LOG.debug("Current nodes: {}", nodeMap.keySet());
   }
 
   /**
@@ -165,6 +167,8 @@ public abstract class RemoteProcedureDispatcher<TEnv, TRemote extends Comparable
     if (key == null) {
       throw new NullTargetServerDispatchException(rp.toString());
     }
+
+    LOG.debug("addOperationToNode Current nodes: {}", nodeMap.keySet());
     BufferNode node = nodeMap.get(key);
     if (node == null) {
       // If null here, it means node has been removed because it crashed. This happens when server

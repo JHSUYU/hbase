@@ -168,6 +168,7 @@ public abstract class AbstractProtobufLogWriter {
   public void init(FileSystem fs, Path path, Configuration conf, boolean overwritable,
     long blocksize, StreamSlowMonitor monitor) throws IOException, StreamLacksCapabilityException {
     try {
+      LOG.debug("Failure Recovery, path is: " + path);
       this.conf = conf;
       boolean doCompress = initializeCompressionContext(conf, path);
       this.trailerWarnSize = conf.getInt(WAL_TRAILER_WARN_SIZE, DEFAULT_WAL_TRAILER_WARN_SIZE);

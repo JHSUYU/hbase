@@ -1091,7 +1091,10 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     this.flushPolicy = FlushPolicyFactory.create(this, conf);
 
     long lastFlushTime = EnvironmentEdgeManager.currentTime();
-    for (HStore store : stores.values()) {
+    if(this.stores$dryrun == null){
+      this.stores$dryrun = DryRunManager.clone(this.stores);
+    }
+    for (HStore store : stores$dryrun.values()) {
       this.lastStoreFlushTimeMap.put(store, lastFlushTime);
     }
 
@@ -1261,7 +1264,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
   private long initializeStores(CancelableProgressable reporter, MonitoredTask status)
     throws IOException {
     if(TraceUtil.isDryRun()){
-      return initializeStores(reporter, status, false);
+      return initializeStores$instrumentation(reporter, status, false);
     }
     return initializeStores(reporter, status, false);
   }
@@ -1403,11 +1406,15 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       } catch (ExecutionException e) {
         throw new IOException(e.getCause());
       } finally {
+        if(this.stores$dryrun == null){
+          LOG.info("Failure Recovery, this.stores$dryrun is copied from this.stores");
+          this.stores$dryrun = DryRunManager.clone(this.stores);
+        }
         storeOpenerThreadPool.shutdownNow();
         if (!allStoresOpened) {
           // something went wrong, close all opened stores
           LOG.error("Could not initialize all stores for the region=" + this);
-          for (HStore store : this.stores.values()) {
+          for (HStore store : this.stores$dryrun.values()) {
             try {
               store.close();
             } catch (IOException e) {
@@ -3416,6 +3423,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     protected final Result[] results;
 
     protected final HRegion region;
+    protected HRegion region$dryrun;
     protected int nextIndexToProcess = 0;
     protected final ObservedExceptionsInBatch observedExceptions;
     // Durability of the batch (highest durability of all operations)
@@ -3521,6 +3529,7 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         // 2) If no WAL, FSWALEntry won't be used
         // we use durability of the original mutation for the mutation passed by CP.
         if (isInReplay() || getMutation(index).getDurability() == Durability.SKIP_WAL) {
+          LOG.info("Skipping stamping sequence id for replayed operation");
           region.updateSequenceId(familyCellMaps[index].values(), writeNumber);
         }
         applyFamilyMapToMemStore(familyCellMaps[index], memStoreAccounting);
@@ -3834,11 +3843,30 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
      */
     protected void applyFamilyMapToMemStore(Map<byte[], List<Cell>> familyMap,
       MemStoreSizing memstoreAccounting) throws IOException {
+      if(TraceUtil.isDryRun()){
+        LOG.debug("FL,redirect applyFamilyMapToMemStore$instrumentation");
+        applyFamilyMapToMemStore$instrumentation(familyMap, memstoreAccounting);
+        return;
+      }
+      LOG.debug("FL,enter applyFamilyMapToMemStore");
       for (Map.Entry<byte[], List<Cell>> e : familyMap.entrySet()) {
         byte[] family = e.getKey();
         List<Cell> cells = e.getValue();
         assert cells instanceof RandomAccess;
         region.applyToMemStore(region.getStore(family), cells, false, memstoreAccounting);
+      }
+    }
+
+    protected void applyFamilyMapToMemStore$instrumentation(Map<byte[], List<Cell>> familyMap,
+      MemStoreSizing memstoreAccounting) throws IOException {
+      for (Map.Entry<byte[], List<Cell>> e : familyMap.entrySet()) {
+        byte[] family = e.getKey();
+        List<Cell> cells = e.getValue();
+        assert cells instanceof RandomAccess;
+        if(region$dryrun == null){
+          region$dryrun = DryRunManager.clone(region);
+        }
+        region$dryrun.applyToMemStore(region$dryrun.getStore(family), cells, false, memstoreAccounting);
       }
     }
   }
@@ -4744,12 +4772,133 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
     return batchOp.retCodeDetails;
   }
 
+  private void doMiniBatchMutate$instrumentation(BatchOperation<?> batchOp) throws IOException {
+    boolean success = false;
+    WALEdit walEdit = null;
+    WriteEntry writeEntry = null;
+    boolean locked = false;
+    // We try to set up a batch in the range [batchOp.nextIndexToProcess,lastIndexExclusive)
+    MiniBatchOperationInProgress<Mutation> miniBatchOp = null;
+    /** Keep track of the locks we hold so we can release them in finally clause */
+    List<RowLock> acquiredRowLocks = Lists.newArrayListWithCapacity(batchOp.size());
+
+    // Check for thread interrupt status in case we have been signaled from
+    // #interruptRegionOperation.
+    checkInterrupt();
+
+    try {
+      // STEP 1. Try to acquire as many locks as we can and build mini-batch of operations with
+      // locked rows
+      miniBatchOp = batchOp.lockRowsAndBuildMiniBatch(acquiredRowLocks);
+
+      // We've now grabbed as many mutations off the list as we can
+      // Ensure we acquire at least one.
+      if (miniBatchOp.getReadyToWriteCount() <= 0) {
+        // Nothing to put/delete/increment/append -- an exception in the above such as
+        // NoSuchColumnFamily?
+        return;
+      }
+
+      // Check for thread interrupt status in case we have been signaled from
+      // #interruptRegionOperation. Do it before we take the lock and disable interrupts for
+      // the WAL append.
+      checkInterrupt();
+
+      lock(this.updatesLock.readLock(), miniBatchOp.getReadyToWriteCount());
+      locked = true;
+
+      // From this point until memstore update this operation should not be interrupted.
+      disableInterrupts();
+
+      // STEP 2. Update mini batch of all operations in progress with LATEST_TIMESTAMP timestamp
+      // We should record the timestamp only after we have acquired the rowLock,
+      // otherwise, newer puts/deletes/increment/append are not guaranteed to have a newer
+      // timestamp
+
+      long now = EnvironmentEdgeManager.currentTime();
+      batchOp.prepareMiniBatchOperations(miniBatchOp, now, acquiredRowLocks);
+
+      // STEP 3. Build WAL edit
+
+      List<Pair<NonceKey, WALEdit>> walEdits = batchOp.buildWALEdits(miniBatchOp);
+
+      // STEP 4. Append the WALEdits to WAL and sync.
+
+      for (Iterator<Pair<NonceKey, WALEdit>> it = walEdits.iterator(); it.hasNext();) {
+        Pair<NonceKey, WALEdit> nonceKeyWALEditPair = it.next();
+        walEdit = nonceKeyWALEditPair.getSecond();
+        NonceKey nonceKey = nonceKeyWALEditPair.getFirst();
+
+        if (walEdit != null && !walEdit.isEmpty()) {
+          writeEntry = doWALAppend(walEdit, batchOp.durability, batchOp.getClusterIds(), now,
+            nonceKey.getNonceGroup(), nonceKey.getNonce(), batchOp.getOrigLogSeqNum());
+        }
+
+        // Complete mvcc for all but last writeEntry (for replay case)
+        if (it.hasNext() && writeEntry != null) {
+          mvcc.complete(writeEntry);
+          writeEntry = null;
+        }
+      }
+
+      LOG.debug("Failure Recovery, entering step5 write back to memStore");
+
+      // STEP 5. Write back to memStore
+      // NOTE: writeEntry can be null here
+      writeEntry = batchOp.writeMiniBatchOperationsToMemStore(miniBatchOp, writeEntry);
+
+      // STEP 6. Complete MiniBatchOperations: If required calls postBatchMutate() CP hook and
+      // complete mvcc for last writeEntry
+      batchOp.completeMiniBatchOperations(miniBatchOp, writeEntry);
+      writeEntry = null;
+      success = true;
+    } finally {
+      // Call complete rather than completeAndWait because we probably had error if walKey != null
+      if (writeEntry != null) mvcc.complete(writeEntry);
+
+      if (locked) {
+        this.updatesLock.readLock().unlock();
+      }
+      releaseRowLocks(acquiredRowLocks);
+
+      enableInterrupts();
+
+      final int finalLastIndexExclusive =
+        miniBatchOp != null ? miniBatchOp.getLastIndexExclusive() : batchOp.size();
+      final boolean finalSuccess = success;
+      batchOp.visitBatchOperations(true, finalLastIndexExclusive, (int i) -> {
+        Mutation mutation = batchOp.getMutation(i);
+        if (mutation instanceof Increment || mutation instanceof Append) {
+          if (finalSuccess) {
+            batchOp.retCodeDetails[i] =
+              new OperationStatus(OperationStatusCode.SUCCESS, batchOp.results[i]);
+          } else {
+            batchOp.retCodeDetails[i] = OperationStatus.FAILURE;
+          }
+        } else {
+          batchOp.retCodeDetails[i] =
+            finalSuccess ? OperationStatus.SUCCESS : OperationStatus.FAILURE;
+        }
+        return true;
+      });
+
+      batchOp.doPostOpCleanupForMiniBatch(miniBatchOp, walEdit, finalSuccess);
+
+      batchOp.nextIndexToProcess = finalLastIndexExclusive;
+    }
+  }
+
   /**
    * Called to do a piece of the batch that came in to {@link #batchMutate(Mutation[])} In here we
    * also handle replay of edits on region recover. Also gets change in size brought about by
    * applying {@code batchOp}.
    */
   private void doMiniBatchMutate(BatchOperation<?> batchOp) throws IOException {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to doMiniBatchMutate$instrumentation");
+      doMiniBatchMutate$instrumentation(batchOp);
+      return;
+    }
     boolean success = false;
     WALEdit walEdit = null;
     WriteEntry writeEntry = null;
@@ -5291,11 +5440,30 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
    */
   private void applyToMemStore(HStore store, List<Cell> cells, boolean delta,
     MemStoreSizing memstoreAccounting) throws IOException {
+    if(TraceUtil.isDryRun()){
+      applyToMemStore$instrumentation(store, cells, delta, memstoreAccounting);
+      return;
+    }
     // Any change in how we update Store/MemStore needs to also be done in other applyToMemStore!!!!
     boolean upsert = delta && store.getColumnFamilyDescriptor().getMaxVersions() == 1;
     if (upsert) {
+      LOG.info("FL, apply store.upsert");
       store.upsert(cells, getSmallestReadPoint(), memstoreAccounting);
     } else {
+      LOG.info("FL, apply store.add");
+      store.add(cells, memstoreAccounting);
+    }
+  }
+
+  private void applyToMemStore$instrumentation(HStore store, List<Cell> cells, boolean delta,
+    MemStoreSizing memstoreAccounting) throws IOException {
+    // Any change in how we update Store/MemStore needs to also be done in other applyToMemStore!!!!
+    boolean upsert = delta && store.getColumnFamilyDescriptor().getMaxVersions() == 1;
+    if (upsert) {
+      LOG.info("FL, apply store.upsert");
+      store.upsert(cells, getSmallestReadPoint(), memstoreAccounting);
+    } else {
+      LOG.info("FL, apply store.add");
       store.add(cells, memstoreAccounting);
     }
   }
@@ -6777,16 +6945,21 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
 
   @Override
   public HStore getStore(byte[] column) {
-    if(TraceUtil.isDryRun()){
+    if(true){
       return getStore$instrumentation(column);
     }
+    LOG.info("No FL, stores is {}, stores is{}", stores, stores.size());
+    LOG.info("this.stores.get(column) == null is {}", this.stores.get(column) == null);
     return this.stores.get(column);
   }
 
   public HStore getStore$instrumentation(byte[] column) {
     if(stores$dryrun == null){
+      LOG.info("FL, enter DryRunManager.clone");
       stores$dryrun = DryRunManager.clone(stores);
     }
+    LOG.info("FL, stores$dryrun is {}, stores$size is{}", stores$dryrun, stores$dryrun.size());
+    LOG.info("FL, stores is {}, stores is{}", stores, stores.size());
     return this.stores$dryrun.get(column);
   }
 

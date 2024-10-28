@@ -275,6 +275,7 @@ public class ServerCrashProcedure extends
           services.getAssignmentManager().getRegionStates().removeServer(serverName);
           services.getServerManager().getDeadServers().finish(serverName);
           updateProgress(true);
+          LOG.debug("Failure Recovery, ServerCrashProcedure finished {}", this);
           return Flow.NO_MORE_STATE;
         default:
           throw new UnsupportedOperationException("unhandled state=" + state);

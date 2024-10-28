@@ -27,6 +27,8 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.yetus.audience.InterfaceAudience;
 
 /**
@@ -44,7 +46,9 @@ public class CellSet implements NavigableSet<Cell> {
   // is not already present.", this implementation "Adds the specified element to this set EVEN
   // if it is already present overwriting what was there previous".
   // Otherwise, has same attributes as ConcurrentSkipListSet
-  private final NavigableMap<Cell, Cell> delegatee; ///
+  private final NavigableMap<Cell, Cell> delegatee;///
+
+  private NavigableMap<Cell, Cell> delegatee$dryrun;///
 
   private final int numUniqueKeys;
 
@@ -160,7 +164,17 @@ public class CellSet implements NavigableSet<Cell> {
 
   @Override
   public boolean add(Cell e) {
+    if(TraceUtil.isDryRun()){
+      return add$instrumentation(e);
+    }
     return this.delegatee.put(e, e) == null;
+  }
+
+  public boolean add$instrumentation(Cell e) {
+    if(this.delegatee$dryrun == null){
+      this.delegatee$dryrun = DryRunManager.clone(this.delegatee);
+    }
+    return this.delegatee$dryrun.put(e, e) == null;
   }
 
   @Override

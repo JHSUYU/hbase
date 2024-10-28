@@ -2402,8 +2402,10 @@ public class HRegionServer extends Thread
   @Override
   public WAL getWAL(RegionInfo regionInfo) throws IOException {
     try {
+      LOG.debug("Creating WAL for region, walFactory classname={}", walFactory.getClass().getName());
       WAL wal = walFactory.getWAL(regionInfo);
       if (this.walRoller != null) {
+        LOG.debug("Failure Recovery is {}. Adding WAL to LogRoller", TraceUtil.isDryRun());
         this.walRoller.addWAL(wal);
       }
       return wal;

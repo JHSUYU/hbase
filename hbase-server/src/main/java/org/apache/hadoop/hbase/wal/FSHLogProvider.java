@@ -95,6 +95,7 @@ public class FSHLogProvider extends AbstractFSWALProvider<FSHLog> {
 
   @Override
   protected FSHLog createWAL() throws IOException {
+    LOG.debug("Creating new WAL for FSHLogProvider");
     return new FSHLog(CommonFSUtils.getWALFileSystem(conf), abortable,
       CommonFSUtils.getWALRootDir(conf), getWALDirectoryName(factory.factoryId),
       getWALArchiveDirectoryName(conf, factory.factoryId), conf, listeners, true, logPrefix,

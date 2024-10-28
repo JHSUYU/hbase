@@ -168,11 +168,11 @@ public class RegionServerTracker extends ZKListener {
   // execute the operations which are only needed for active masters, such as expire old servers,
   // add new servers, etc.
   private void processAsActiveMaster(Set<ServerName> newServers) {
-    if(TraceUtil.isDryRun()){
-      LOG.info("Failure Recovery, processAsActiveMaster redircted to dry run");
-      processAsActiveMaster$instrumentation(newServers);
-      return;
-    }
+//    if(TraceUtil.isDryRun()){
+//      LOG.info("Failure Recovery, processAsActiveMaster redircted to dry run");
+//      processAsActiveMaster$instrumentation(newServers);
+//      return;
+//    }
     Set<ServerName> oldServers = regionServers;
     ServerManager serverManager = server.getServerManager();
     // expire dead servers

@@ -67,7 +67,7 @@ class SyncFuture {
    * The transaction id that was set in here when we were marked done. Should be equal or > txnId.
    * Put this data member into the NOT_DONE state while this class is in use.
    */
-  private long doneTxid;
+  public long doneTxid;
 
   /**
    * If error, the associated throwable. Set when the future is 'done'.
@@ -143,6 +143,7 @@ class SyncFuture {
     doneLock.lock();
     try {
       if (doneTxid != NOT_DONE) {
+        System.out.println("FL, doneTxid=" + doneTxid + ", txid=" + txid);
         return false;
       }
       this.throwable = t;

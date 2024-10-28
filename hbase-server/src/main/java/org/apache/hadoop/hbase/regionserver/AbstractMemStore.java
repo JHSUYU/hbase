@@ -25,7 +25,9 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.ExtendedCell;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.exceptions.UnexpectedStateException;
+import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
@@ -45,6 +47,7 @@ public abstract class AbstractMemStore implements MemStore {
 
   // active segment absorbs write operations
   private volatile MutableSegment active;
+  private volatile MutableSegment active$dryrun;
   // Snapshot of memstore. Made for flusher.
   protected volatile ImmutableSegment snapshot;
   protected volatile long snapshotId;
@@ -368,6 +371,12 @@ public abstract class AbstractMemStore implements MemStore {
   }
 
   MutableSegment getActive() {
+    if(TraceUtil.isDryRun()){
+      if(active$dryrun == null){
+        active$dryrun = DryRunManager.clone(active);
+      }
+      return active$dryrun;
+    }
     return active;
   }
 

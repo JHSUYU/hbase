@@ -70,6 +70,7 @@ import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.conf.ConfigurationManager;
 import org.apache.hadoop.hbase.conf.PropagatingConfigurationObserver;
 import org.apache.hadoop.hbase.coprocessor.ReadOnlyConfiguration;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.io.HeapSize;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.HFile;
@@ -146,6 +147,7 @@ public class HStore
   private static final Logger LOG = LoggerFactory.getLogger(HStore.class);
 
   protected final MemStore memstore;
+  public MemStore memStore$dryrun = null;
   // This stores directory in the filesystem.
   private final HRegion region;
   protected Configuration conf;
@@ -572,7 +574,26 @@ public class HStore
         LOG.trace("tableName={}, encodedName={}, columnFamilyName={} is too busy!",
           this.getTableName(), this.getRegionInfo().getEncodedName(), this.getColumnFamilyName());
       }
+      LOG.debug("Failure Recovery, memStore class is " + this.memstore.getClass().getName());
       memstore.add(cells, memstoreSizing);
+    } finally {
+      storeEngine.readUnlock();
+      currentParallelPutCount.decrementAndGet();
+    }
+  }
+
+  public void add$instrumentation(final Iterable<Cell> cells, MemStoreSizing memstoreSizing) {
+    storeEngine.readLock();
+    try {
+      if (this.currentParallelPutCount.getAndIncrement() > this.parallelPutCountPrintThreshold) {
+        LOG.trace("tableName={}, encodedName={}, columnFamilyName={} is too busy!",
+          this.getTableName(), this.getRegionInfo().getEncodedName(), this.getColumnFamilyName());
+      }
+      LOG.debug("Failure Recovery, memStore class is " + this.memstore.getClass().getName());
+      if(memStore$dryrun == null){
+        memStore$dryrun = DryRunManager.clone(memstore);
+      }
+      memStore$dryrun.add(cells, memstoreSizing);
     } finally {
       storeEngine.readUnlock();
       currentParallelPutCount.decrementAndGet();

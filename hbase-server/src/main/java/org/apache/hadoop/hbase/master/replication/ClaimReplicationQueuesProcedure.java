@@ -83,6 +83,7 @@ public class ClaimReplicationQueuesProcedure extends Procedure<MasterProcedureEn
   protected Procedure<MasterProcedureEnv>[] execute(MasterProcedureEnv env)
     throws ProcedureYieldException, ProcedureSuspendedException, InterruptedException {
     if(isDryRun){
+      LOG.debug("FL, redir, ClaimReplicationQueuesProcedure.java: execute: isDryRun: " + isDryRun);
       return execute$instrumentation(env);
     }
     ReplicationQueueStorage storage = env.getReplicationPeerManager().getQueueStorage();
@@ -98,6 +99,7 @@ public class ClaimReplicationQueuesProcedure extends Procedure<MasterProcedureEn
         crashedServer);
       List<ServerName> targetServers =
         env.getMasterServices().getServerManager().getOnlineServersList();
+      LOG.debug("ClaimReplicationQueuesProcedure.java: execute: targetServers: " + targetServers);
       if (targetServers.isEmpty()) {
         throw new ReplicationException("no region server available");
       }
@@ -142,6 +144,7 @@ public class ClaimReplicationQueuesProcedure extends Procedure<MasterProcedureEn
       }
       List<ServerName> targetServers =
         env.getMasterServices().getServerManager().getOnlineServersList();
+      LOG.debug("FL, ClaimReplicationQueuesProcedure.java: execute: targetServers: " + targetServers);
       if (targetServers.isEmpty()) {
         throw new ReplicationException("no region server available");
       }

@@ -123,8 +123,8 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
    * @return true, if current state is in expected list; otherwise false.
    */
   public boolean setState(final State update, final State... expected) {
-    Exception e = new IOException();
-    e.printStackTrace();;
+//    Exception e = new IOException();
+//    e.printStackTrace();;
     if (!isInState(expected)) {
       return false;
     }
@@ -234,7 +234,7 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
   }
 
   public ServerName setRegionLocation(final ServerName serverName) {
-    if(TraceUtil.isDryRun()){
+    if(TraceUtil.isDryRun() || isDryRun){
       LOG.info("Failure Recovery, setRegionLocation redirect to setRegionLocation$instrumentation");
       return setRegionLocation$instrumentation(serverName);
     }

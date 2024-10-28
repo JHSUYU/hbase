@@ -63,7 +63,8 @@ public class WALFactory {
    * Maps between configuration names for providers and implementation classes.
    */
   enum Providers {
-    defaultProvider(AsyncFSWALProvider.class),
+    //defaultProvider(AsyncFSWALProvider.class),
+    defaultProvider(FSHLogProvider.class),
     filesystem(FSHLogProvider.class),
     multiwal(RegionGroupingProvider.class),
     asyncfs(AsyncFSWALProvider.class);
@@ -291,12 +292,16 @@ public class WALFactory {
    */
   public WAL getWAL(RegionInfo region) throws IOException {
     // Use different WAL for hbase:meta. Instantiates the meta WALProvider if not already up.
+    LOG.debug("getting WAL for region " + (region == null ? "null" : region.getEncodedName()));
     if (
       region != null && region.isMetaRegion()
         && region.getReplicaId() == RegionInfo.DEFAULT_REPLICA_ID
     ) {
+      LOG.debug("using meta WAL for region " + region.getEncodedName());
       return getMetaProvider().getWAL(region);
     } else {
+      LOG.debug("using WAL for region " + (region == null ? "null" : region.getEncodedName()));
+      LOG.debug("provider=" + provider);
       return provider.getWAL(region);
     }
   }

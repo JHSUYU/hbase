@@ -68,6 +68,7 @@ import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.PrivateCellUtil;
 import org.apache.hadoop.hbase.client.RegionInfo;
+import org.apache.hadoop.hbase.dryrun.DryRunManager;
 import org.apache.hadoop.hbase.exceptions.TimeoutIOException;
 import org.apache.hadoop.hbase.io.util.MemorySizeUtil;
 import org.apache.hadoop.hbase.ipc.RpcServer;
@@ -211,6 +212,8 @@ public abstract class AbstractFSWAL<W extends WriterBase> implements WAL {
    * facility for answering questions such as "Is it safe to GC a WAL?".
    */
   protected final SequenceIdAccounting sequenceIdAccounting = new SequenceIdAccounting();
+
+  public SequenceIdAccounting sequenceIdAccounting$dryrun;
 
   protected final long slowSyncNs, rollOnSyncNs;
   protected final int slowSyncRollThreshold;
@@ -1187,9 +1190,15 @@ public abstract class AbstractFSWAL<W extends WriterBase> implements WAL {
     highestUnsyncedTxid = entry.getTxid();
     if (entry.isCloseRegion()) {
       // let's clean all the records of this region
-      sequenceIdAccounting.onRegionClose(encodedRegionName);
+      if(sequenceIdAccounting$dryrun == null){
+        sequenceIdAccounting$dryrun = DryRunManager.deepClone(sequenceIdAccounting);
+      }
+      sequenceIdAccounting$dryrun.onRegionClose(encodedRegionName);
     } else {
-      sequenceIdAccounting.update(encodedRegionName, entry.getFamilyNames(), regionSequenceId,
+      if(sequenceIdAccounting$dryrun == null){
+        sequenceIdAccounting$dryrun = DryRunManager.deepClone(sequenceIdAccounting);
+      }
+      sequenceIdAccounting$dryrun.update(encodedRegionName, entry.getFamilyNames(), regionSequenceId,
         entry.isInMemStore());
     }
     coprocessorHost.postWALWrite(entry.getRegionInfo(), entry.getKey(), entry.getEdit());

@@ -3194,6 +3194,91 @@ public class RSRpcServices
   @Override
   public MutateResponse mutate(final RpcController rpcc, final MutateRequest request)
     throws ServiceException {
+    if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery, redirect to mutate$instrumentation");
+      return mutate$instrumentation(rpcc, request);
+
+    }
+    // rpc controller is how we bring in data via the back door; it is unprotobuf'ed data.
+    // It is also the conduit via which we pass back data.
+    HBaseRpcController controller = (HBaseRpcController) rpcc;
+    CellScanner cellScanner = controller != null ? controller.cellScanner() : null;
+    OperationQuota quota = null;
+    RpcCallContext context = RpcServer.getCurrentCall().orElse(null);
+    // Clear scanner so we are not holding on to reference across call.
+    if (controller != null) {
+      controller.setCellScanner(null);
+    }
+    try {
+      checkOpen();
+      requestCount.increment();
+      rpcMutateRequestCount.increment();
+      HRegion region = getRegion(request.getRegion());
+      MutateResponse.Builder builder = MutateResponse.newBuilder();
+      MutationProto mutation = request.getMutation();
+      if (!region.getRegionInfo().isMetaRegion()) {
+        regionServer.getMemStoreFlusher().reclaimMemStoreMemory();
+      }
+      long nonceGroup = request.hasNonceGroup() ? request.getNonceGroup() : HConstants.NO_NONCE;
+      quota = getRpcQuotaManager().checkQuota(region, OperationQuota.OperationType.MUTATE);
+      ActivePolicyEnforcement spaceQuotaEnforcement =
+        getSpaceQuotaManager().getActiveEnforcements();
+
+      if (request.hasCondition()) {
+        CheckAndMutateResult result = checkAndMutate(region, quota, mutation, cellScanner,
+          request.getCondition(), nonceGroup, spaceQuotaEnforcement);
+        builder.setProcessed(result.isSuccess());
+        boolean clientCellBlockSupported = isClientCellBlockSupport(context);
+        addResult(builder, result.getResult(), controller, clientCellBlockSupported);
+        if (clientCellBlockSupported) {
+          addSize(context, result.getResult(), null);
+        }
+      } else {
+        Result r = null;
+        Boolean processed = null;
+        MutationType type = mutation.getMutateType();
+        switch (type) {
+          case APPEND:
+            // TODO: this doesn't actually check anything.
+            r = append(region, quota, mutation, cellScanner, nonceGroup, spaceQuotaEnforcement);
+            break;
+          case INCREMENT:
+            // TODO: this doesn't actually check anything.
+            r = increment(region, quota, mutation, cellScanner, nonceGroup, spaceQuotaEnforcement);
+            break;
+          case PUT:
+            put(region, quota, mutation, cellScanner, spaceQuotaEnforcement);
+            processed = Boolean.TRUE;
+            break;
+          case DELETE:
+            delete(region, quota, mutation, cellScanner, spaceQuotaEnforcement);
+            processed = Boolean.TRUE;
+            break;
+          default:
+            throw new DoNotRetryIOException("Unsupported mutate type: " + type.name());
+        }
+        if (processed != null) {
+          builder.setProcessed(processed);
+        }
+        boolean clientCellBlockSupported = isClientCellBlockSupport(context);
+        addResult(builder, r, controller, clientCellBlockSupported);
+        if (clientCellBlockSupported) {
+          addSize(context, r, null);
+        }
+      }
+      return builder.build();
+    } catch (IOException ie) {
+      regionServer.checkFileSystem();
+      throw new ServiceException(ie);
+    } finally {
+      if (quota != null) {
+        quota.close();
+      }
+    }
+  }
+
+  public MutateResponse mutate$instrumentation(final RpcController rpcc, final MutateRequest request)
+    throws ServiceException {
     // rpc controller is how we bring in data via the back door; it is unprotobuf'ed data.
     // It is also the conduit via which we pass back data.
     HBaseRpcController controller = (HBaseRpcController) rpcc;

@@ -439,7 +439,7 @@ public class ReplicationSource implements ReplicationSourceInterface {
         LOG.debug("Failure Recovery, {} starting shipping worker for walGroupId={}", logPeerId(), walGroupId);
         ReplicationSourceShipper worker = createNewShipper(walGroupId);
         worker.isDryRun = TraceUtil.isDryRun();
-        TraceUtil.createDryRunBaggage();
+        //TraceUtil.createDryRunBaggage();
         ReplicationSourceWALReader walReader =
           createNewWALReader(walGroupId, worker.getStartPosition());
         LOG.debug("Failure Recovery, replicationSourceWALReader classname is {}", walReader.getClass().getName());
@@ -525,6 +525,10 @@ public class ReplicationSource implements ReplicationSourceInterface {
   private void checkError(Thread t, Throwable error) {
     RSRpcServices.exitIfOOME(error);
     LOG.error("Unexpected exception in {} currentPath={}", t.getName(), getCurrentPath(), error);
+    if(t instanceof ReplicationSourceWALReader){
+      boolean isDryRun = ((ReplicationSourceWALReader)t).isDryRun;
+      LOG.error("Unexpected exception in {} isDryRun={}", t.getName(), isDryRun);
+    }
     if (abortOnError) {
       server.abort("Unexpected exception in " + t.getName(), error);
     }
@@ -785,6 +789,7 @@ public class ReplicationSource implements ReplicationSourceInterface {
   @Override
   public ReplicationSourceInterface startup() {
     if(TraceUtil.isDryRun()){
+      LOG.debug("Failure Recovery,redirecting to startup$instrumentation");
       return startup$instrumentation();
     }
     if (this.sourceRunning) {

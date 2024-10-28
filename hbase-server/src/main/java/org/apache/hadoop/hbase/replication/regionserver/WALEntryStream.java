@@ -360,6 +360,7 @@ class WALEntryStream implements Closeable {
       // Just sleep and retry. Will require re-reading compressed WALs for compressionContext.
       LOG.warn("Got NPE opening reader, will retry.");
       reader = null;
+      //throw npe;
     }
   }
 

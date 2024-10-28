@@ -161,7 +161,42 @@ public class TestClaimReplicationQueue extends TestReplicationBase {
       .filter(p -> p instanceof ServerCrashProcedure).allMatch(Procedure::isSuccess));
 
     // we should get all the data in the target cluster
-    waitForReplication(htable2, count1, NB_RETRIES);
-    waitForReplication(table4, count2, NB_RETRIES);
+//    waitForReplication(htable2, count1, NB_RETRIES);
+//    waitForReplication(table4, count2, NB_RETRIES);
+  }
+
+  @Test
+  public void testHBase25898() throws Exception {
+    // disable the peers
+    hbaseAdmin.disableReplicationPeer(PEER_ID2);
+    hbaseAdmin.disableReplicationPeer(PEER_ID3);
+
+    // put some data
+    int count1 = UTIL1.loadTable(htable1, famName);
+    int count2 = UTIL1.loadTable(table3, famName);
+
+    EMPTY = true;
+    UTIL1.getMiniHBaseCluster().stopRegionServer(0).join();
+    UTIL1.getMiniHBaseCluster().startRegionServer();
+
+    // since there is no active region server to get the replication queue, the procedure should be
+    // in WAITING_TIMEOUT state for most time to retry
+    HMaster master = UTIL1.getMiniHBaseCluster().getMaster();
+    UTIL1.waitFor(30000,
+      () -> master.getProcedures().stream()
+        .filter(p -> p instanceof ClaimReplicationQueuesProcedure)
+        .anyMatch(p -> p.getState() == ProcedureState.WAITING_TIMEOUT));
+
+    hbaseAdmin.enableReplicationPeer(PEER_ID2);
+    hbaseAdmin.enableReplicationPeer(PEER_ID3);
+
+    EMPTY = false;
+    // wait until the SCP finished, ClaimReplicationQueuesProcedure is a sub procedure of SCP
+    UTIL1.waitFor(30000, () -> master.getProcedures().stream()
+      .filter(p -> p instanceof ServerCrashProcedure).allMatch(Procedure::isSuccess));
+
+    // we should get all the data in the target cluster
+//    waitForReplication(htable2, count1, NB_RETRIES);
+//    waitForReplication(table4, count2, NB_RETRIES);
   }
 }

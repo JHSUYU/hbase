@@ -67,14 +67,14 @@ public class ProtobufLogWriter extends AbstractProtobufLogWriter implements FSHL
   }
 
   public void append$instrumentation(Entry entry) throws IOException {
-    entry.getKey().getBuilder(compressor).setFollowingKvCount(entry.getEdit().size()).build()
-      .writeDelimitedTo(output);
-    for (Cell cell : entry.getEdit().getCells()) {
-      // cellEncoder must assume little about the stream, since we write PB and cells in turn.
-      LOG.debug("Failure Recovery, cellEncoder class name is: " + cellEncoder.getClass().getName());
-      cellEncoder.write(cell);
-    }
-    length.set(output.getPos());
+//    entry.getKey().getBuilder(compressor).setFollowingKvCount(entry.getEdit().size()).build()
+//      .writeDelimitedTo(output);
+//    for (Cell cell : entry.getEdit().getCells()) {
+//      // cellEncoder must assume little about the stream, since we write PB and cells in turn.
+//      LOG.debug("Failure Recovery, cellEncoder class name is: " + cellEncoder.getClass().getName());
+//      cellEncoder.write(cell);
+//    }
+//    length.set(output.getPos());
   }
 
   @Override
