@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.master.procedure;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.stream.Collectors;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.master.ServerListener;
 import org.apache.hadoop.hbase.master.ServerManager;
@@ -63,7 +64,8 @@ public class LogRollProcedure
           serverManager.registerListener(new NewServerWALRoller(env));
 
           final List<LogRollRemoteProcedure> subProcedures =
-            serverManager.getOnlineServersList().stream().map(LogRollRemoteProcedure::new).toList();
+            serverManager.getOnlineServersList().stream().map(LogRollRemoteProcedure::new)
+              .collect(Collectors.toList());
           addChildProcedure(subProcedures.toArray(new LogRollRemoteProcedure[0]));
           setNextState(LogRollProcedureState.LOG_ROLL_COLLECT_RS_HIGHEST_WAL_FILENUM);
           return Flow.HAS_MORE_STATE;
@@ -73,7 +75,7 @@ public class LogRollProcedure
             env.getMasterServices().getMasterProcedureExecutor().getProcedures().stream()
               .filter(p -> p instanceof LogRollRemoteProcedure)
               .filter(p -> p.getParentProcId() == getProcId()).map(p -> (LogRollRemoteProcedure) p)
-              .toList();
+              .collect(Collectors.toList());
           LastHighestWalFilenum.Builder builder = LastHighestWalFilenum.newBuilder();
           for (Procedure<MasterProcedureEnv> child : children) {
             LogRollRemoteProcedureResult result =

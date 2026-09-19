@@ -35,6 +35,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 import org.apache.commons.lang3.NotImplementedException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
@@ -271,7 +272,8 @@ public class FSTableDescriptors implements TableDescriptors {
       final long startTime = EnvironmentEdgeManager.currentTime();
       AtomicBoolean allvisited = new AtomicBoolean(usecache);
       List<Path> tableDirs =
-        FSUtils.getTableDirs(fs, rootdir).stream().filter(FSUtils::isLocalMetaTable).toList();
+        FSUtils.getTableDirs(fs, rootdir).stream().filter(FSUtils::isLocalMetaTable)
+          .collect(Collectors.toList());
       if (!tableDescriptorParallelLoadEnable) {
         for (Path dir : tableDirs) {
           internalGet(dir, tds, allvisited);

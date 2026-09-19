@@ -17,6 +17,8 @@
  */
 package org.apache.hadoop.hbase.master.balancer;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import org.apache.hadoop.hbase.client.RegionInfo;
@@ -30,8 +32,8 @@ abstract class TableIsolationConditional extends RegionPlanConditional {
     BalancerConditionals balancerConditionals, BalancerClusterState cluster) {
     super(balancerConditionals.getConf(), cluster);
 
-    this.candidateGenerators =
-      List.of(generator, new SlopFixingCandidateGenerator(balancerConditionals));
+    this.candidateGenerators = Collections
+      .unmodifiableList(Arrays.asList(generator, new SlopFixingCandidateGenerator(balancerConditionals)));
   }
 
   abstract boolean isRegionToIsolate(RegionInfo regionInfo);

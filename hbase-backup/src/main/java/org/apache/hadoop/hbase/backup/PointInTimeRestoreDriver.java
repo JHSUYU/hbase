@@ -46,11 +46,9 @@ import org.apache.hbase.thirdparty.com.google.common.base.Strings;
  */
 @InterfaceAudience.Private
 public class PointInTimeRestoreDriver extends AbstractRestoreDriver {
-  private static final String USAGE_STRING = """
-      Usage: hbase pitr [options]
-        <backup_path>   Backup Path to use for Point in Time Restore
-        table(s)        Comma-separated list of tables to restore
-      """;
+  private static final String USAGE_STRING = "Usage: hbase pitr [options]\n"
+    + "  <backup_path>   Backup Path to use for Point in Time Restore\n"
+    + "  table(s)        Comma-separated list of tables to restore\n";
 
   @Override
   protected int executeRestore(boolean check, TableName[] fromTables, TableName[] toTables,

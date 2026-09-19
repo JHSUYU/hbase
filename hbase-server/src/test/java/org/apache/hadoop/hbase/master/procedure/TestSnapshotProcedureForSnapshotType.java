@@ -62,7 +62,7 @@ public class TestSnapshotProcedureForSnapshotType extends TestSnapshotProcedure 
     admin.snapshot(snapshotName, tableName);
     Optional<SnapshotDescription> optional =
       admin.listSnapshots().stream().filter(s -> snapshotName.equals(s.getName())).findFirst();
-    SnapshotDescription snapshotDescription = optional.orElseThrow();
+    SnapshotDescription snapshotDescription = optional.get();
     assertEquals(SnapshotType.FLUSH, snapshotDescription.getType());
   }
 
@@ -84,7 +84,7 @@ public class TestSnapshotProcedureForSnapshotType extends TestSnapshotProcedure 
     admin.snapshot(snapshotName, tableName);
     Optional<SnapshotDescription> optional =
       admin.listSnapshots().stream().filter(s -> snapshotName.equals(s.getName())).findFirst();
-    SnapshotDescription snapshotDescription = optional.orElseThrow();
+    SnapshotDescription snapshotDescription = optional.get();
     assertEquals(SnapshotType.DISABLED, snapshotDescription.getType());
   }
 }

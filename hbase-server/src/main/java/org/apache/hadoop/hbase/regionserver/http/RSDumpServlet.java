@@ -83,7 +83,8 @@ public class RSDumpServlet extends StateDumpServlet {
 
       out.println("\n\nStacks:");
       out.println(LINE);
-      PrintStream ps = new PrintStream(response.getOutputStream(), false, StandardCharsets.UTF_8);
+      PrintStream ps =
+        new PrintStream(response.getOutputStream(), false, StandardCharsets.UTF_8.name());
       Threads.printThreadInfo(ps, "");
       ps.flush();
 

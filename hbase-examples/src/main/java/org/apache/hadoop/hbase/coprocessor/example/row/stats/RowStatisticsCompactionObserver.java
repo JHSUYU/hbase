@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.stream.Collectors;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.CoprocessorEnvironment;
@@ -169,8 +168,7 @@ public class RowStatisticsCompactionObserver
           NAMESPACED_TABLE_NAME);
       } else {
         boolean shouldCreateNamespace =
-          Arrays.stream(admin.listNamespaces()).filter(namespace -> namespace.equals(NAMESPACE))
-            .collect(Collectors.toUnmodifiableSet()).isEmpty();
+          Arrays.stream(admin.listNamespaces()).noneMatch(namespace -> namespace.equals(NAMESPACE));
         if (shouldCreateNamespace) {
           NamespaceDescriptor nd = NamespaceDescriptor.create(NAMESPACE).build();
           try {
@@ -180,7 +178,7 @@ public class RowStatisticsCompactionObserver
           }
         }
         ColumnFamilyDescriptor cfd = ColumnFamilyDescriptorBuilder.newBuilder(CF).setMaxVersions(25)
-          .setTimeToLive((int) Duration.ofDays(7).toSeconds()).build();
+          .setTimeToLive((int) Duration.ofDays(7).getSeconds()).build();
         TableDescriptor td =
           TableDescriptorBuilder.newBuilder(NAMESPACED_TABLE_NAME).setColumnFamily(cfd).build();
         LOG.info("Creating table {}", NAMESPACED_TABLE_NAME);

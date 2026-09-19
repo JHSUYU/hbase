@@ -22,6 +22,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.CompareOperator;
@@ -127,7 +128,7 @@ public class TestReadOnlyControllerRegionObserver {
     compactionLifeCycleTracker = mock(CompactionLifeCycleTracker.class);
     StoreFile sf1 = mock(StoreFile.class);
     StoreFile sf2 = mock(StoreFile.class);
-    candidates = List.of(sf1, sf2);
+    candidates = Arrays.asList(sf1, sf2);
     scanType = ScanType.COMPACT_DROP_DELETES;
     compactionRequest = mock(CompactionRequest.class);
     tableName = TableName.valueOf("testTable");
@@ -151,9 +152,9 @@ public class TestReadOnlyControllerRegionObserver {
     append = mock(Append.class);
     increment = mock(Increment.class);
     edits = mock(Path.class);
-    familyPaths = List.of(new Pair<>(Bytes.toBytes("test-family"), "/path/to/hfile1"),
+    familyPaths = Arrays.asList(new Pair<>(Bytes.toBytes("test-family"), "/path/to/hfile1"),
       new Pair<>(Bytes.toBytes("test-family"), "/path/to/hfile2"));
-    pairs = List.of(new Pair<>(mock(Path.class), mock(Path.class)),
+    pairs = Arrays.asList(new Pair<>(mock(Path.class), mock(Path.class)),
       new Pair<>(mock(Path.class), mock(Path.class)));
     key = mock(WALKey.class);
 

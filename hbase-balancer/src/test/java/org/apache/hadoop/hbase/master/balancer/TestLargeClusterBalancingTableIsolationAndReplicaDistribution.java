@@ -25,7 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.Set;
+import java.util.function.Function;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
@@ -40,6 +40,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableSet;
 
 @Tag(LargeTests.TAG)
 @Tag(MasterTests.TAG)
@@ -103,7 +105,8 @@ public class TestLargeClusterBalancingTableIsolationAndReplicaDistribution {
     DistributeReplicasTestConditional.enableConditionalReplicaDistributionForTest(conf);
 
     runBalancerToExhaustion(conf, serverToRegions,
-      Set.of(this::isMetaTableIsolated, this::isSystemTableIsolated,
+      ImmutableSet.<Function<BalancerClusterState, Boolean>>of(this::isMetaTableIsolated,
+        this::isSystemTableIsolated,
         CandidateGeneratorTestUtil::areAllReplicasDistributed),
       10.0f, 60_000, CandidateGeneratorTestUtil.ExhaustionType.COST_GOAL_ACHIEVED);
     LOG.info("Meta table regions are successfully isolated, "

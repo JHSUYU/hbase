@@ -46,6 +46,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
 import org.apache.hbase.thirdparty.com.google.common.collect.Sets;
 
 @Tag(LargeTests.TAG)
@@ -96,7 +97,7 @@ public class TestContinuousBackup extends TestBackupBase {
       // Verify backup history increased and all the backups are succeeded
       List<BackupInfo> backups = table.getBackupHistory();
       assertEquals(before + 1, backups.size(), "Backup history should increase");
-      for (BackupInfo data : List.of(backups.get(0))) {
+      for (BackupInfo data : ImmutableList.of(backups.get(0))) {
         String backupId = data.getBackupId();
         assertTrue(checkSucceeded(backupId));
       }
@@ -139,7 +140,7 @@ public class TestContinuousBackup extends TestBackupBase {
       // Verify backup history increased and all the backups are succeeded
       List<BackupInfo> backups = table.getBackupHistory();
       assertEquals(before + 2, backups.size(), "Backup history should increase");
-      for (BackupInfo data : List.of(backups.get(0), backups.get(1))) {
+      for (BackupInfo data : ImmutableList.of(backups.get(0), backups.get(1))) {
         String backupId = data.getBackupId();
         assertTrue(checkSucceeded(backupId));
       }

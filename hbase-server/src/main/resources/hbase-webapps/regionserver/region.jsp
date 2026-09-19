@@ -152,7 +152,7 @@
 
                mobCnt ++;
                String mobPathStr = mobPath.toString();
-               String encodedStr = URLEncoder.encode(mobPathStr, StandardCharsets.UTF_8); %>
+               String encodedStr = URLEncoder.encode(mobPathStr, StandardCharsets.UTF_8.name()); %>
 
                <tr>
                  <td><a href="storeFile.jsp?name=<%= encodedStr%>"><%= mobPathStr%></a></td>

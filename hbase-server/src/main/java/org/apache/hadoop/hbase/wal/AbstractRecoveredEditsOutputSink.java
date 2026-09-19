@@ -81,14 +81,14 @@ abstract class AbstractRecoveredEditsOutputSink extends OutputSink {
     return new RecoveredEditsWriter(region, regionEditsPath, w, seqId);
   }
 
-  private String getWorkerNameComponent() {
+  private String getWorkerNameComponent() throws IOException {
     if (walSplitter.rsServices == null) {
       return "";
     }
     return URLEncoder.encode(
       walSplitter.rsServices.getServerName().toShortString()
         .replace(Addressing.HOSTNAME_PORT_SEPARATOR, ServerName.SERVERNAME_SEPARATOR),
-      StandardCharsets.UTF_8);
+      StandardCharsets.UTF_8.name());
   }
 
   /**

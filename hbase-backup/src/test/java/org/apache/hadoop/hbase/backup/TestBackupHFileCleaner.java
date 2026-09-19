@@ -42,6 +42,9 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableMap;
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableSet;
 import org.apache.hbase.thirdparty.com.google.common.collect.Sets;
 
 @Tag(MasterTests.TAG)
@@ -95,7 +98,7 @@ public class TestBackupHFileCleaner {
     BackupHFileCleaner cleaner = new BackupHFileCleaner() {
       @Override
       protected Set<TableName> fetchFullyBackedUpTables(BackupSystemTable tbl) {
-        return Set.of(tableNameWithBackup);
+        return ImmutableSet.of(tableNameWithBackup);
       }
     };
     cleaner.setConf(conf);
@@ -103,25 +106,25 @@ public class TestBackupHFileCleaner {
     Iterable<FileStatus> deletable;
 
     // The first call will not allow any deletions because of the timestamp mechanism.
-    deletable = callCleaner(cleaner, List.of(file1, file1Archived, file2, file3));
-    assertEquals(Set.of(), Sets.newHashSet(deletable));
+    deletable = callCleaner(cleaner, ImmutableList.of(file1, file1Archived, file2, file3));
+    assertEquals(ImmutableSet.of(), Sets.newHashSet(deletable));
 
     // No bulk loads registered, so all files can be deleted.
-    deletable = callCleaner(cleaner, List.of(file1, file1Archived, file2, file3));
-    assertEquals(Set.of(file1, file1Archived, file2, file3), Sets.newHashSet(deletable));
+    deletable = callCleaner(cleaner, ImmutableList.of(file1, file1Archived, file2, file3));
+    assertEquals(ImmutableSet.of(file1, file1Archived, file2, file3), Sets.newHashSet(deletable));
 
     // Register some bulk loads.
     try (BackupSystemTable backupSystem = new BackupSystemTable(TEST_UTIL.getConnection())) {
       byte[] unused = new byte[] { 0 };
       backupSystem.registerBulkLoad(tableNameWithBackup, unused,
-        Map.of(unused, List.of(file1.getPath())));
+        ImmutableMap.of(unused, ImmutableList.of(file1.getPath())));
       backupSystem.registerBulkLoad(tableNameWithoutBackup, unused,
-        Map.of(unused, List.of(file2.getPath())));
+        ImmutableMap.of(unused, ImmutableList.of(file2.getPath())));
     }
 
     // File 1 can no longer be deleted, because it is registered as a bulk load.
-    deletable = callCleaner(cleaner, List.of(file1, file1Archived, file2, file3));
-    assertEquals(Set.of(file2, file3), Sets.newHashSet(deletable));
+    deletable = callCleaner(cleaner, ImmutableList.of(file1, file1Archived, file2, file3));
+    assertEquals(ImmutableSet.of(file2, file3), Sets.newHashSet(deletable));
   }
 
   private Iterable<FileStatus> callCleaner(BackupHFileCleaner cleaner, Iterable<FileStatus> files) {

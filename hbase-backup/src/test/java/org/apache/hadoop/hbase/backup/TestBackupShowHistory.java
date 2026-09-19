@@ -32,6 +32,8 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
+
 @Tag(LargeTests.TAG)
 public class TestBackupShowHistory extends TestBackupBase {
 
@@ -52,7 +54,7 @@ public class TestBackupShowHistory extends TestBackupBase {
     assertEquals(0, history.size());
 
     // Create first backup
-    String backupId = fullTableBackup(List.of(table1));
+    String backupId = fullTableBackup(ImmutableList.of(table1));
     assertTrue(checkSucceeded(backupId));
     LOG.info("backup complete");
 
@@ -69,7 +71,7 @@ public class TestBackupShowHistory extends TestBackupBase {
     assertTrue(output.indexOf(backupId) > 0);
 
     // Create second backup
-    String backupId2 = fullTableBackup(List.of(table2));
+    String backupId2 = fullTableBackup(ImmutableList.of(table2));
     assertTrue(checkSucceeded(backupId2));
     LOG.info("backup complete: " + table2);
 

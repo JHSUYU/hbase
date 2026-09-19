@@ -767,7 +767,8 @@ class RawAsyncHBaseAdmin implements AsyncAdmin {
 
   @Override
   public CompletableFuture<Void> reopenTableRegions(TableName tableName, List<RegionInfo> regions) {
-    List<byte[]> regionNames = regions.stream().map(RegionInfo::getRegionName).toList();
+    List<byte[]> regionNames =
+      regions.stream().map(RegionInfo::getRegionName).collect(Collectors.toList());
     return this.<ReopenTableRegionsRequest, ReopenTableRegionsResponse> procedureCall(tableName,
       RequestConverter.buildReopenTableRegionsRequest(tableName, regionNames, ng.getNonceGroup(),
         ng.newNonce()),
@@ -3315,8 +3316,10 @@ class RawAsyncHBaseAdmin implements AsyncAdmin {
             RequestConverter.buildRollAllWALWritersRequest(ng.getNonceGroup(), ng.newNonce()),
             (s, c, req, done) -> s.rollAllWALWriters(c, req, done), resp -> resp.getProcId(),
             result -> LastHighestWalFilenum.parseFrom(result.toByteArray()).getFileNumMap()
-              .entrySet().stream().collect(Collectors
-                .toUnmodifiableMap(e -> ServerName.valueOf(e.getKey()), Map.Entry::getValue)),
+              .entrySet().stream()
+              .collect(Collectors.collectingAndThen(
+                Collectors.toMap(e -> ServerName.valueOf(e.getKey()), Map.Entry::getValue),
+                Collections::unmodifiableMap)),
             new RollAllWALWritersBiConsumer());
   }
 

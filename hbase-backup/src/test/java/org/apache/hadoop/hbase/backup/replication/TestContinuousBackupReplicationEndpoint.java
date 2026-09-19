@@ -88,6 +88,9 @@ import org.mockito.MockedStatic;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableMap;
+
 @Tag(ReplicationTests.TAG)
 @Tag(LargeTests.TAG)
 public class TestContinuousBackupReplicationEndpoint {
@@ -153,7 +156,7 @@ public class TestContinuousBackupReplicationEndpoint {
     waitForReplication(15000);
     deleteReplicationPeer(peerId);
 
-    verifyBackup(backupRootDir.toString(), true, Map.of(tableName, 1100));
+    verifyBackup(backupRootDir.toString(), true, ImmutableMap.of(tableName, 1100));
 
     deleteTable(tableName);
   }
@@ -166,7 +169,7 @@ public class TestContinuousBackupReplicationEndpoint {
     TableName table3 = TableName.valueOf("table_" + methodName + "3");
     String peerId = "peerMulti";
 
-    for (TableName table : List.of(table1, table2, table3)) {
+    for (TableName table : ImmutableList.of(table1, table2, table3)) {
       createTable(table);
     }
 
@@ -179,7 +182,7 @@ public class TestContinuousBackupReplicationEndpoint {
 
     addReplicationPeer(peerId, backupRootDir, initialTableMap);
 
-    for (TableName table : List.of(table1, table2, table3)) {
+    for (TableName table : ImmutableList.of(table1, table2, table3)) {
       loadRandomData(table, 50);
       assertEquals(50, getRowCount(table));
     }
@@ -190,10 +193,10 @@ public class TestContinuousBackupReplicationEndpoint {
     admin.updateReplicationPeerConfig(peerId,
       ReplicationPeerConfig.newBuilder(admin.getReplicationPeerConfig(peerId))
         .setTableCFsMap(
-          Map.of(table1, new ArrayList<>(), table2, new ArrayList<>(), table3, new ArrayList<>()))
+          ImmutableMap.of(table1, new ArrayList<>(), table2, new ArrayList<>(), table3, new ArrayList<>()))
         .build());
 
-    for (TableName table : List.of(table1, table2, table3)) {
+    for (TableName table : ImmutableList.of(table1, table2, table3)) {
       loadRandomData(table, 50);
       assertEquals(100, getRowCount(table));
     }
@@ -201,9 +204,9 @@ public class TestContinuousBackupReplicationEndpoint {
     waitForReplication(15000);
     deleteReplicationPeer(peerId);
 
-    verifyBackup(backupRootDir.toString(), false, Map.of(table1, 100, table2, 100, table3, 50));
+    verifyBackup(backupRootDir.toString(), false, ImmutableMap.of(table1, 100, table2, 100, table3, 50));
 
-    for (TableName table : List.of(table1, table2, table3)) {
+    for (TableName table : ImmutableList.of(table1, table2, table3)) {
       deleteTable(table);
     }
   }
@@ -259,7 +262,7 @@ public class TestContinuousBackupReplicationEndpoint {
     waitForReplication(20000);
     deleteReplicationPeer(peerId);
 
-    verifyBackup(backupRootDir.toString(), false, Map.of(tableName, getRowCount(tableName)));
+    verifyBackup(backupRootDir.toString(), false, ImmutableMap.of(tableName, getRowCount(tableName)));
 
     deleteTable(tableName);
   }
@@ -306,7 +309,7 @@ public class TestContinuousBackupReplicationEndpoint {
     waitForReplication(15000);
     deleteReplicationPeer(peerId);
 
-    verifyBackup(backupRootDir.toString(), false, Map.of(tableName, 200));
+    verifyBackup(backupRootDir.toString(), false, ImmutableMap.of(tableName, 200));
 
     // Verify that WALs are stored in two directories, one for each day
     Path walDir = new Path(backupRootDir, WALS_DIR);
@@ -365,7 +368,7 @@ public class TestContinuousBackupReplicationEndpoint {
     waitForReplication(15000);
     deleteReplicationPeer(peerId);
 
-    verifyBackup(backupRootDir.toString(), true, Map.of(tableName, 1100));
+    verifyBackup(backupRootDir.toString(), true, ImmutableMap.of(tableName, 1100));
 
     deleteTable(tableName);
   }
@@ -471,7 +474,7 @@ public class TestContinuousBackupReplicationEndpoint {
     waitForReplication(15000);
     deleteReplicationPeer(peerId);
 
-    verifyBackup(backupRootDir.toString(), true, Map.of(tableName, 1100));
+    verifyBackup(backupRootDir.toString(), true, ImmutableMap.of(tableName, 1100));
 
     deleteTable(tableName);
   }
@@ -720,7 +723,7 @@ public class TestContinuousBackupReplicationEndpoint {
             bulkLoadFiles.add(filePath);
           }
         }
-        bulkLoadHFiles(tableName, Map.of(Bytes.toBytes(CF_NAME), bulkLoadFiles));
+        bulkLoadHFiles(tableName, ImmutableMap.of(Bytes.toBytes(CF_NAME), bulkLoadFiles));
       }
     } catch (Exception e) {
       fail("Failed to replay BulkLoad HFiles properly: " + e.getMessage());

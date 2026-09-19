@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hbase.coprocessor;
 
+import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
 import org.apache.hadoop.hbase.CoprocessorEnvironment;
@@ -101,7 +102,7 @@ public class ObserverContextImpl<E extends CoprocessorEnvironment> implements Ob
   public static <E extends CoprocessorEnvironment> ObserverContext<E> createAndPrepare(E env) {
     Optional<User> user = RpcServer.getRequestUser();
     ObserverRpcCallContext rpcCallContext =
-      user.map(value -> new ObserverRpcCallContextImpl(value, Map.of())).orElse(null);
+      user.map(value -> new ObserverRpcCallContextImpl(value, Collections.emptyMap())).orElse(null);
 
     ObserverContextImpl<E> ctx = new ObserverContextImpl<>(rpcCallContext);
     ctx.prepare(env);

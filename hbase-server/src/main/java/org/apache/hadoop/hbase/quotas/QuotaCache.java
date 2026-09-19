@@ -460,7 +460,7 @@ public class QuotaCache implements Stoppable {
       this.name = name;
       this.cache =
         CacheBuilder.newBuilder().expireAfterWrite(refreshPeriod.toMillis(), TimeUnit.MILLISECONDS)
-          .build(new CacheLoader<>() {
+          .build(new CacheLoader<String, Optional<T>>() {
             @Override
             public Optional<T> load(String key) {
               try {

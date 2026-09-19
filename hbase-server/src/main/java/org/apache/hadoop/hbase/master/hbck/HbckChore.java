@@ -25,6 +25,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.CatalogFamilyFormat;
@@ -262,7 +263,8 @@ public class HbckChore extends ScheduledChore {
 
     int numRegions = 0;
     List<Path> tableDirs =
-      FSUtils.getTableDirs(fs, rootDir).stream().filter(FSUtils::isLocalMetaTable).toList();
+      FSUtils.getTableDirs(fs, rootDir).stream().filter(FSUtils::isLocalMetaTable)
+        .collect(Collectors.toList());
     for (Path tableDir : tableDirs) {
       List<Path> regionDirs = FSUtils.getRegionDirs(fs, tableDir);
       for (Path regionDir : regionDirs) {

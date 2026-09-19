@@ -45,6 +45,8 @@ import org.apache.hadoop.hbase.util.HFileTestUtil;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
+
 /**
  * This test checks whether backups properly track & manage bulk files loads.
  */
@@ -61,37 +63,37 @@ public class TestIncrementalBackupWithBulkLoad extends TestBackupBase {
       // The test starts with some data, and no bulk loaded rows.
       int expectedRowCount = NB_ROWS_IN_BATCH;
       assertEquals(expectedRowCount, TEST_UTIL.countRows(table1));
-      assertTrue(systemTable.readBulkloadRows(List.of(table1)).isEmpty());
+      assertTrue(systemTable.readBulkloadRows(ImmutableList.of(table1)).isEmpty());
 
       // Bulk loads aren't tracked if the table isn't backed up yet
       performBulkLoad("bulk1");
       expectedRowCount += ROWS_IN_BULK_LOAD;
       assertEquals(expectedRowCount, TEST_UTIL.countRows(table1));
-      assertEquals(0, systemTable.readBulkloadRows(List.of(table1)).size());
+      assertEquals(0, systemTable.readBulkloadRows(ImmutableList.of(table1)).size());
 
       // Create a backup, bulk loads are now being tracked
-      String backup1 = backupTables(BackupType.FULL, List.of(table1), BACKUP_ROOT_DIR);
+      String backup1 = backupTables(BackupType.FULL, ImmutableList.of(table1), BACKUP_ROOT_DIR);
       assertTrue(checkSucceeded(backup1));
       performBulkLoad("bulk2");
       expectedRowCount += ROWS_IN_BULK_LOAD;
       assertEquals(expectedRowCount, TEST_UTIL.countRows(table1));
-      assertEquals(1, systemTable.readBulkloadRows(List.of(table1)).size());
+      assertEquals(1, systemTable.readBulkloadRows(ImmutableList.of(table1)).size());
 
       // Truncating or deleting a table clears the tracked bulk loads (and all rows)
       TEST_UTIL.truncateTable(table1).close();
       expectedRowCount = 0;
       assertEquals(expectedRowCount, TEST_UTIL.countRows(table1));
-      assertEquals(0, systemTable.readBulkloadRows(List.of(table1)).size());
+      assertEquals(0, systemTable.readBulkloadRows(ImmutableList.of(table1)).size());
 
       // Creating a full backup clears the bulk loads (since they are captured in the snapshot)
       performBulkLoad("bulk3");
       expectedRowCount = ROWS_IN_BULK_LOAD;
       assertEquals(expectedRowCount, TEST_UTIL.countRows(table1));
-      assertEquals(1, systemTable.readBulkloadRows(List.of(table1)).size());
-      String backup2 = backupTables(BackupType.FULL, List.of(table1), BACKUP_ROOT_DIR);
+      assertEquals(1, systemTable.readBulkloadRows(ImmutableList.of(table1)).size());
+      String backup2 = backupTables(BackupType.FULL, ImmutableList.of(table1), BACKUP_ROOT_DIR);
       assertTrue(checkSucceeded(backup2));
       assertEquals(expectedRowCount, TEST_UTIL.countRows(table1));
-      assertEquals(0, systemTable.readBulkloadRows(List.of(table1)).size());
+      assertEquals(0, systemTable.readBulkloadRows(ImmutableList.of(table1)).size());
 
       // Creating an incremental backup clears the bulk loads
       performBulkLoad("bulk4");
@@ -99,18 +101,18 @@ public class TestIncrementalBackupWithBulkLoad extends TestBackupBase {
       performBulkLoad("bulk6");
       expectedRowCount += 3 * ROWS_IN_BULK_LOAD;
       assertEquals(expectedRowCount, TEST_UTIL.countRows(table1));
-      assertEquals(3, systemTable.readBulkloadRows(List.of(table1)).size());
-      String backup3 = backupTables(BackupType.INCREMENTAL, List.of(table1), BACKUP_ROOT_DIR);
+      assertEquals(3, systemTable.readBulkloadRows(ImmutableList.of(table1)).size());
+      String backup3 = backupTables(BackupType.INCREMENTAL, ImmutableList.of(table1), BACKUP_ROOT_DIR);
       assertTrue(checkSucceeded(backup3));
       assertEquals(expectedRowCount, TEST_UTIL.countRows(table1));
-      assertEquals(0, systemTable.readBulkloadRows(List.of(table1)).size());
+      assertEquals(0, systemTable.readBulkloadRows(ImmutableList.of(table1)).size());
       int rowCountAfterBackup3 = expectedRowCount;
 
       // Doing another bulk load, to check that this data will disappear after a restore operation
       performBulkLoad("bulk7");
       expectedRowCount += ROWS_IN_BULK_LOAD;
       assertEquals(expectedRowCount, TEST_UTIL.countRows(table1));
-      List<BulkLoad> bulkloadsTemp = systemTable.readBulkloadRows(List.of(table1));
+      List<BulkLoad> bulkloadsTemp = systemTable.readBulkloadRows(ImmutableList.of(table1));
       assertEquals(1, bulkloadsTemp.size());
       BulkLoad bulk7 = bulkloadsTemp.get(0);
 
@@ -121,7 +123,7 @@ public class TestIncrementalBackupWithBulkLoad extends TestBackupBase {
       client.restore(BackupUtils.createRestoreRequest(BACKUP_ROOT_DIR, backup3, false,
         new TableName[] { table1 }, new TableName[] { table1 }, true));
       assertEquals(rowCountAfterBackup3, TEST_UTIL.countRows(table1));
-      List<BulkLoad> bulkLoads = systemTable.readBulkloadRows(List.of(table1));
+      List<BulkLoad> bulkLoads = systemTable.readBulkloadRows(ImmutableList.of(table1));
       assertEquals(2, bulkLoads.size());
       assertFalse(bulkLoads.contains(bulk7));
 
@@ -181,7 +183,7 @@ public class TestIncrementalBackupWithBulkLoad extends TestBackupBase {
       TestBackupBase.IncrementalTableBackupClientForTest client =
         new TestBackupBase.IncrementalTableBackupClientForTest(TEST_UTIL.getConnection(),
           "test_backup_id",
-          createBackupRequest(BackupType.INCREMENTAL, List.of(table1), BACKUP_ROOT_DIR));
+          createBackupRequest(BackupType.INCREMENTAL, ImmutableList.of(table1), BACKUP_ROOT_DIR));
 
       client.updateFileLists(activeFiles, archiveFiles);
 
@@ -224,7 +226,7 @@ public class TestIncrementalBackupWithBulkLoad extends TestBackupBase {
       TestBackupBase.IncrementalTableBackupClientForTest client =
         new TestBackupBase.IncrementalTableBackupClientForTest(TEST_UTIL.getConnection(),
           "test_backup_id",
-          createBackupRequest(BackupType.INCREMENTAL, List.of(table1), BACKUP_ROOT_DIR));
+          createBackupRequest(BackupType.INCREMENTAL, ImmutableList.of(table1), BACKUP_ROOT_DIR));
 
       // This should throw IOException since file doesn't exist in archive
       try {

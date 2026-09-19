@@ -93,7 +93,7 @@ public class TestRegionMoverFilterRSGroupServers {
     String groupName = "test_default_filter";
 
     admin.addRSGroup(groupName);
-    admin.moveServersToRSGroup(new HashSet<>(List.of(addressOf(movedOut))), groupName);
+    admin.moveServersToRSGroup(new HashSet<>(Collections.singletonList(addressOf(movedOut))), groupName);
     try {
       // Master-computed membership, not something we constructed ourselves.
       RSGroupInfo defaultGroup = admin.getRSGroup(RSGroupInfo.DEFAULT_GROUP);
@@ -116,7 +116,7 @@ public class TestRegionMoverFilterRSGroupServers {
             + "group being filtered is named 'default'");
       }
     } finally {
-      admin.moveServersToRSGroup(new HashSet<>(List.of(addressOf(movedOut))),
+      admin.moveServersToRSGroup(new HashSet<>(Collections.singletonList(addressOf(movedOut))),
         RSGroupInfo.DEFAULT_GROUP);
       admin.removeRSGroup(groupName);
     }
@@ -138,7 +138,7 @@ public class TestRegionMoverFilterRSGroupServers {
     String groupName = "test_nondefault_filter";
 
     admin.addRSGroup(groupName);
-    admin.moveServersToRSGroup(new HashSet<>(List.of(addressOf(member))), groupName);
+    admin.moveServersToRSGroup(new HashSet<>(Collections.singletonList(addressOf(member))), groupName);
     try {
       RSGroupInfo group = admin.getRSGroup(groupName);
       assertEquals(1, group.getServers().size(),
@@ -156,7 +156,7 @@ public class TestRegionMoverFilterRSGroupServers {
           "Server that is not a member of the group must not be returned as a destination");
       }
     } finally {
-      admin.moveServersToRSGroup(new HashSet<>(List.of(addressOf(member))),
+      admin.moveServersToRSGroup(new HashSet<>(Collections.singletonList(addressOf(member))),
         RSGroupInfo.DEFAULT_GROUP);
       admin.removeRSGroup(groupName);
     }
@@ -179,7 +179,7 @@ public class TestRegionMoverFilterRSGroupServers {
     String groupName = "test_absent_filter";
 
     admin.addRSGroup(groupName);
-    admin.moveServersToRSGroup(new HashSet<>(List.of(addressOf(member))), groupName);
+    admin.moveServersToRSGroup(new HashSet<>(Collections.singletonList(addressOf(member))), groupName);
     try {
       RSGroupInfo group = admin.getRSGroup(groupName);
       assertEquals(1, group.getServers().size(),
@@ -196,7 +196,7 @@ public class TestRegionMoverFilterRSGroupServers {
             + "destination");
       }
     } finally {
-      admin.moveServersToRSGroup(new HashSet<>(List.of(addressOf(member))),
+      admin.moveServersToRSGroup(new HashSet<>(Collections.singletonList(addressOf(member))),
         RSGroupInfo.DEFAULT_GROUP);
       admin.removeRSGroup(groupName);
     }

@@ -123,9 +123,8 @@ final class BinaryBackend implements ProfilerBackend {
   @Override
   public String executeStart(ProfileServlet.ProfileRequest request, File outputFile)
     throws IOException {
-    // Prefer the caller-supplied ?pid= param; fall back to ProcessHandle (Java 9+, always correct)
-    // rather than ProcessUtils.getPid() which reads the potentially-stale JVM_PID env variable.
-    int pid = request.getPid() != null ? request.getPid() : (int) ProcessHandle.current().pid();
+    // Prefer the caller-supplied ?pid= param; otherwise use the actual JVM process ID.
+    int pid = request.getPid() != null ? request.getPid() : ProcessUtils.getCurrentPid();
     List<String> cmd = ProfilerCommandMapper.toCliCommand(request, outputFile, profilerHome, pid);
     process = ProcessUtils.runCmdAsync(cmd);
     return "";

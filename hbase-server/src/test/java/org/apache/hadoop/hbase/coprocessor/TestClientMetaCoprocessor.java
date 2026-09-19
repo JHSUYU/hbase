@@ -28,6 +28,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -182,7 +183,8 @@ public class TestClientMetaCoprocessor {
 
       HRegionLocation metaRegionLocation =
         new HRegionLocation(RegionInfoBuilder.FIRST_META_REGIONINFO, SERVER_NAME);
-      doReturn(List.of(metaRegionLocation)).when(observer).postGetMetaLocations(any(), any());
+      doReturn(Collections.singletonList(metaRegionLocation)).when(observer)
+        .postGetMetaLocations(any(), any());
       clearInvocations(observer);
 
       RegionLocations regionLocations = connectionRegistry.getMetaRegionLocations().get();

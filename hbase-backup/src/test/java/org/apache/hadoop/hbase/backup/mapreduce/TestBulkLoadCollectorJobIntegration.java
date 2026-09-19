@@ -29,6 +29,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileStatus;
@@ -191,7 +192,7 @@ public class TestBulkLoadCollectorJobIntegration {
     assertTrue(dfs.exists(outDir), "Output directory should exist");
 
     List<Path> partFiles = Arrays.stream(dfs.listStatus(outDir)).map(FileStatus::getPath)
-      .filter(p -> p.getName().startsWith("part-")).toList();
+      .filter(p -> p.getName().startsWith("part-")).collect(Collectors.toList());
 
     assertFalse(partFiles.isEmpty(), "Expect at least one part file in output");
 
@@ -199,12 +200,12 @@ public class TestBulkLoadCollectorJobIntegration {
     List<String> lines = partFiles.stream().flatMap(p -> {
       try (FSDataInputStream in = dfs.open(p);
         BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-        List<String> fileLines = r.lines().toList();
+        List<String> fileLines = r.lines().collect(Collectors.toList());
         return fileLines.stream();
       } catch (Exception e) {
         throw new RuntimeException(e);
       }
-    }).toList();
+    }).collect(Collectors.toList());
 
     assertFalse(lines.isEmpty(), "Job should have emitted at least one storefile path");
 

@@ -35,12 +35,11 @@ import org.apache.yetus.audience.InterfaceAudience;
  */
 @InterfaceAudience.Private
 public class RestoreDriver extends AbstractRestoreDriver {
-  private static final String USAGE_STRING = """
-      Usage: hbase restore <backup_path> <backup_id> [options]
-        backup_path     Path to a backup destination root
-        backup_id       Backup image ID to restore
-        table(s)        Comma-separated list of tables to restore
-      """;
+  private static final String USAGE_STRING =
+    "Usage: hbase restore <backup_path> <backup_id> [options]\n"
+      + "  backup_path     Path to a backup destination root\n"
+      + "  backup_id       Backup image ID to restore\n"
+      + "  table(s)        Comma-separated list of tables to restore\n";
 
   @Override
   protected int executeRestore(boolean check, TableName[] fromTables, TableName[] toTables,

@@ -152,7 +152,7 @@ public final class GlobalMetricRegistriesAdapter {
       Entry<MetricRegistryInfo, MetricsSourceAdapter> entry = it.next();
       MetricRegistryInfo info = entry.getKey();
       Optional<MetricRegistry> found = MetricRegistries.global().get(info);
-      if (found.isEmpty()) {
+      if (!found.isPresent()) {
         if (LOG.isDebugEnabled()) {
           LOG.debug("Removing adapter for the MetricRegistry: {}", info.getMetricsJmxContext());
         }

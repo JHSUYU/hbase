@@ -809,7 +809,7 @@ public abstract class RpcServer implements RpcServerInterface, ConfigurationObse
    * @return the attribute map. It will be empty if the method is called outside of an RPC context.
    */
   public static Map<String, byte[]> getConnectionAttributes() {
-    return getCurrentCall().map(RpcCall::getConnectionAttributes).orElse(Map.of());
+    return getCurrentCall().map(RpcCall::getConnectionAttributes).orElse(Collections.emptyMap());
   }
 
   /**

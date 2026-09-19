@@ -23,7 +23,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.function.Function;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
@@ -40,6 +40,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableSet;
 
 @Tag(MediumTests.TAG)
 @Tag(MasterTests.TAG)
@@ -104,7 +106,8 @@ public class TestLargeClusterBalancingConditionalReplicaDistribution {
     conf.setLong("hbase.master.balancer.stochastic.regionReplicaHostCostKey", 0);
 
     runBalancerToExhaustion(conf, serverToRegions,
-      Set.of(CandidateGeneratorTestUtil::areAllReplicasDistributed), 10.0f);
+      ImmutableSet.<Function<BalancerClusterState, Boolean>>of(
+        CandidateGeneratorTestUtil::areAllReplicasDistributed), 10.0f);
     LOG.info("Region replicas are appropriately distributed across RegionServers.");
   }
 }

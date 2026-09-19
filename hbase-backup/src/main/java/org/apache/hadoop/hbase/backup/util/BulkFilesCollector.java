@@ -26,6 +26,7 @@ import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileSystem;
@@ -99,7 +100,8 @@ public final class BulkFilesCollector {
     }
 
     List<String> walDirs =
-      Arrays.stream(walDirsCsv.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList();
+      Arrays.stream(walDirsCsv.split(",")).map(String::trim).filter(s -> !s.isEmpty())
+        .collect(Collectors.toList());
 
     if (walDirs.isEmpty()) {
       throw new IOException("walDirsCsv did not contain any entries: '" + walDirsCsv + "'");

@@ -48,6 +48,8 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
+
 @Tag(SmallTests.TAG)
 public class TestBackupUtils {
 
@@ -139,7 +141,7 @@ public class TestBackupUtils {
   @Test
   public void testGetValidWalDirForAllTimeZonesSingleDay() throws IOException {
     // This UTC test time is a time when it is still "yesterday" in other time zones (such as PST)
-    List<String> walDateDirs = List.of("2026-01-23");
+    List<String> walDateDirs = ImmutableList.of("2026-01-23");
     Path walDir = new Path(backupRootDir, "WALs");
 
     // 10-minute window in UTC between start and end time
@@ -153,8 +155,8 @@ public class TestBackupUtils {
   // zones
   @Test
   public void testGetValidWalDirsForAllTimeZonesMultiDay() throws IOException {
-    List<String> walDateDirs = List.of("2025-12-30", "2025-12-31", "2026-01-01", "2026-01-02");
-    List<String> expectedValidWalDirs = List.of("2025-12-31", "2026-01-01");
+    List<String> walDateDirs = ImmutableList.of("2025-12-30", "2025-12-31", "2026-01-01", "2026-01-02");
+    List<String> expectedValidWalDirs = ImmutableList.of("2025-12-31", "2026-01-01");
     Path walDir = new Path(backupRootDir, "WALs");
 
     // 10-minute window in UTC between start and end time that spans over two days
@@ -166,7 +168,7 @@ public class TestBackupUtils {
 
   @Test
   public void testGetValidWalDirExactlyMidnightUTC() throws IOException {
-    List<String> walDateDirs = List.of("2026-01-23");
+    List<String> walDateDirs = ImmutableList.of("2026-01-23");
     Path walDir = new Path(backupRootDir, "WALs");
     // This instant is UTC
     long startAndEndTime = Instant.parse("2026-01-23T00:00:00.000Z").toEpochMilli();
@@ -176,7 +178,7 @@ public class TestBackupUtils {
 
   @Test
   public void testGetValidWalDirOneMsBeforeMidnightUTC() throws IOException {
-    List<String> walDateDirs = List.of("2026-01-23");
+    List<String> walDateDirs = ImmutableList.of("2026-01-23");
     Path walDir = new Path(backupRootDir, "WALs");
     // This instant is UTC
     long startAndEndTime = Instant.parse("2026-01-23T23:59:59.999Z").toEpochMilli();

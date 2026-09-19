@@ -19,6 +19,9 @@ package org.apache.hadoop.hbase.security.access;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileSystem;
@@ -40,12 +43,15 @@ import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.hbase.thirdparty.com.google.common.io.ByteStreams;
+
 @InterfaceAudience.LimitedPrivate(HBaseInterfaceAudience.CONFIG)
 public abstract class AbstractReadOnlyController implements Coprocessor {
   private static final Logger LOG = LoggerFactory.getLogger(AbstractReadOnlyController.class);
 
   private static final Set<TableName> writableTables =
-    Set.of(TableName.META_TABLE_NAME, MasterRegionFactory.TABLE_NAME);
+    Collections.unmodifiableSet(new HashSet<>(
+      Arrays.asList(TableName.META_TABLE_NAME, MasterRegionFactory.TABLE_NAME)));
 
   public static boolean
     isWritableInReadOnlyMode(final ObserverContext<? extends RegionCoprocessorEnvironment> c) {
@@ -107,7 +113,7 @@ public abstract class AbstractReadOnlyController implements Coprocessor {
           activeClusterFile);
         try (FSDataInputStream in = fs.open(activeClusterFile)) {
           ActiveClusterSuffix actualClusterFileData =
-            ActiveClusterSuffix.parseFrom(in.readAllBytes());
+            ActiveClusterSuffix.parseFrom(ByteStreams.toByteArray(in));
           ActiveClusterSuffix expectedClusterFileData = mfs.getActiveClusterSuffix();
           if (expectedClusterFileData.equals(actualClusterFileData)) {
             fs.delete(activeClusterFile, false);
@@ -138,7 +144,8 @@ public abstract class AbstractReadOnlyController implements Coprocessor {
             mfs.getActiveClusterSuffix(), wait);
         } else {
           try (FSDataInputStream in = fs.open(activeClusterFile)) {
-            ActiveClusterSuffix existingData = ActiveClusterSuffix.parseFrom(in.readAllBytes());
+            ActiveClusterSuffix existingData =
+              ActiveClusterSuffix.parseFrom(ByteStreams.toByteArray(in));
             ActiveClusterSuffix localData = mfs.getActiveClusterSuffix();
             if (localData.equals(existingData)) {
               LOG.debug("Active cluster file already exists at {} and belongs to this cluster. "

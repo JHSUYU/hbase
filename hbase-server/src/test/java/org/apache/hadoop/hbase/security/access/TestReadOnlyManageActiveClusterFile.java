@@ -48,6 +48,7 @@ import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.regionserver.NoOpScanPolicyObserver;
 import org.apache.hadoop.hbase.regionserver.RegionCoprocessorHost;
+import org.apache.hbase.thirdparty.com.google.common.io.ByteStreams;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.SecurityTests;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -325,7 +326,7 @@ public class TestReadOnlyManageActiveClusterFile {
     // Verify the active.cluster.suffix.id file contains this cluster's ID
     assertTrue(activeClusterIdFileExists());
     try (FSDataInputStream in = fs.open(activeClusterFile)) {
-      ActiveClusterSuffix actual = ActiveClusterSuffix.parseFrom(in.readAllBytes());
+      ActiveClusterSuffix actual = ActiveClusterSuffix.parseFrom(ByteStreams.toByteArray(in));
       ActiveClusterSuffix expected = ActiveClusterSuffix.fromConfig(conf, mfs.getClusterId());
       assertEquals(expected, actual);
     }

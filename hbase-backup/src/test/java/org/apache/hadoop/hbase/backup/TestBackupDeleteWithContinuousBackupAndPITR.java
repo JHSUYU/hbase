@@ -33,6 +33,7 @@ import org.apache.hadoop.util.ToolRunner;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableSet;
 import org.apache.hbase.thirdparty.com.google.common.collect.Lists;
 
 /**
@@ -62,11 +63,11 @@ public class TestBackupDeleteWithContinuousBackupAndPITR extends TestBackupBase 
     conf1.setLong(CONF_CONTINUOUS_BACKUP_PITR_WINDOW_DAYS, 30);
     backupSystemTable = new BackupSystemTable(TEST_UTIL.getConnection());
 
-    backupSystemTable.addContinuousBackupTableSet(Set.of(table1), cstTimestamp);
+    backupSystemTable.addContinuousBackupTableSet(ImmutableSet.of(table1), cstTimestamp);
   }
 
   private void cleanupContinuousBackup() throws IOException {
-    backupSystemTable.removeContinuousBackupTableSet(Set.of(table1));
+    backupSystemTable.removeContinuousBackupTableSet(ImmutableSet.of(table1));
   }
 
   /**

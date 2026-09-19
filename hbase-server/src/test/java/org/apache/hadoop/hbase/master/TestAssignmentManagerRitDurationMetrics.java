@@ -64,7 +64,7 @@ public class TestAssignmentManagerRitDurationMetrics {
 
   @Test
   public void testRitDurationHistogramMetric(TestInfo testInfo) throws Exception {
-    TableName tableName = TableName.valueOf(testInfo.getTestMethod().orElseThrow().getName());
+    TableName tableName = TableName.valueOf(testInfo.getTestMethod().get().getName());
     try (Table table = TEST_UTIL.createTable(tableName, FAMILY)) {
       RegionInfo regionInfo =
         MASTER.getAssignmentManager().getRegionStates().getRegionsOfTable(tableName).get(0);

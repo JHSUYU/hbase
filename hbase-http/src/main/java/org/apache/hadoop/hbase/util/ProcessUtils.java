@@ -19,6 +19,8 @@ package org.apache.hadoop.hbase.util;
 
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.List;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -56,6 +58,32 @@ public final class ProcessUtils {
       // ignore
     }
     return null;
+  }
+
+  /**
+   * Returns the current JVM process ID without trusting the potentially stale JVM_PID environment
+   * variable. Java 8 does not provide ProcessHandle, so use the runtime MXBean name first, then
+   * Linux's process-specific /proc/self link if the MXBean name has a different format.
+   */
+  public static int getCurrentPid() {
+    String name = ManagementFactory.getRuntimeMXBean().getName();
+    if (name != null) {
+      int at = name.indexOf('@');
+      if (at > 0) {
+        try {
+          return Integer.valueOf(name.substring(0, at));
+        } catch (NumberFormatException ignored) {
+          // Report an unrecognized JVM process ID below.
+        }
+      }
+    }
+    try {
+      return Integer.parseInt(Files.readSymbolicLink(Paths.get("/proc/self")).toString());
+    } catch (IOException | NumberFormatException | UnsupportedOperationException
+      | SecurityException ignored) {
+      // Report an unrecognized JVM process ID below.
+    }
+    throw new IllegalStateException("Unable to determine the current JVM process ID from " + name);
   }
 
   public static Process runCmdAsync(List<String> cmd) {

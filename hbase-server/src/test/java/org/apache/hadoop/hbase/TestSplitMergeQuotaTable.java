@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.client.AsyncAdmin;
@@ -95,7 +96,8 @@ public class TestSplitMergeQuotaTable {
         // can potentially observe the parent and both children via this interface.
         return admin.getRegions(tableName)
           .thenApply(val -> val.stream()
-            .filter(info -> info.getReplicaId() == RegionInfo.DEFAULT_REPLICA_ID).toList())
+            .filter(info -> info.getReplicaId() == RegionInfo.DEFAULT_REPLICA_ID)
+            .collect(Collectors.toList()))
           .get(30, TimeUnit.SECONDS).size() > 1;
       }
 
@@ -107,12 +109,13 @@ public class TestSplitMergeQuotaTable {
     util.waitUntilNoRegionsInTransition();
     List<RegionInfo> regionInfos = admin.getRegions(tableName)
       .thenApply(val -> val.stream()
-        .filter(info -> info.getReplicaId() == RegionInfo.DEFAULT_REPLICA_ID).toList())
+        .filter(info -> info.getReplicaId() == RegionInfo.DEFAULT_REPLICA_ID)
+        .collect(Collectors.toList()))
       .get(30, TimeUnit.SECONDS);
     assertEquals(2, regionInfos.size());
     LOG.info("{}", regionInfos);
-    admin.mergeRegions(regionInfos.stream().map(RegionInfo::getRegionName).toList(), false).get(30,
-      TimeUnit.SECONDS);
+    admin.mergeRegions(regionInfos.stream().map(RegionInfo::getRegionName)
+      .collect(Collectors.toList()), false).get(30, TimeUnit.SECONDS);
     util.waitFor(30000, new Waiter.ExplainingPredicate<Exception>() {
 
       @Override
@@ -120,7 +123,8 @@ public class TestSplitMergeQuotaTable {
         // can potentially observe the parent and both children via this interface.
         return admin.getRegions(tableName)
           .thenApply(val -> val.stream()
-            .filter(info -> info.getReplicaId() == RegionInfo.DEFAULT_REPLICA_ID).toList())
+            .filter(info -> info.getReplicaId() == RegionInfo.DEFAULT_REPLICA_ID)
+            .collect(Collectors.toList()))
           .get(30, TimeUnit.SECONDS).size() == 1;
       }
 

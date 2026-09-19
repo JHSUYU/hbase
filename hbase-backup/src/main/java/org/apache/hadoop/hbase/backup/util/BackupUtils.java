@@ -599,7 +599,8 @@ public final class BackupUtils {
     Predicate<BackupInfo> combinedPredicate = Stream.of(filters)
       .map(filter -> (Predicate<BackupInfo>) filter).reduce(Predicate::and).orElse(x -> true);
 
-    return infos.stream().filter(combinedPredicate).limit(n).toList();
+    return infos.stream().filter(combinedPredicate).limit(n)
+      .collect(Collectors.collectingAndThen(Collectors.toList(), Collections::unmodifiableList));
   }
 
   public static BackupInfo loadBackupInfo(Path backupRootPath, String backupId, FileSystem fs)

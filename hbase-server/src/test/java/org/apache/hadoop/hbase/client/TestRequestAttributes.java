@@ -126,7 +126,7 @@ public class TestRequestAttributes {
         CONNECTION_ATTRIBUTES);
       Table table = configureRequestAttributes(conn.getTableBuilder(TABLE_NAME, EXECUTOR_SERVICE),
         ROW_KEY_TO_REQUEST_ATTRIBUTES.get(ROW_KEY2A)).build()) {
-      List<Get> gets = List.of(new Get(ROW_KEY2A), new Get(ROW_KEY2B));
+      List<Get> gets = Arrays.asList(new Get(ROW_KEY2A), new Get(ROW_KEY2B));
       table.get(gets);
     }
   }
@@ -170,7 +170,7 @@ public class TestRequestAttributes {
       put1.addColumn(FAMILY, Bytes.toBytes("c1"), Bytes.toBytes("v1"));
       Put put2 = new Put(ROW_KEY4);
       put2.addColumn(FAMILY, Bytes.toBytes("c2"), Bytes.toBytes("v2"));
-      table.put(List.of(put1, put2));
+      table.put(Arrays.asList(put1, put2));
     }
   }
 

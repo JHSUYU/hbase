@@ -183,7 +183,7 @@ public final class AsyncAggregationClient {
       return future;
     }
     AbstractAggregationCallback<R> callback =
-      new AbstractAggregationCallback<>(future, req, AggregateService::getMax) {
+      new AbstractAggregationCallback<R>(future, req, AggregateService::getMax) {
 
         private R max;
         private final Object lock = new Object();
@@ -227,7 +227,7 @@ public final class AsyncAggregationClient {
     }
 
     AbstractAggregationCallback<R> callback =
-      new AbstractAggregationCallback<>(future, req, AggregateService::getMin) {
+      new AbstractAggregationCallback<R>(future, req, AggregateService::getMin) {
 
         private R min;
         private final Object lock = new Object();
@@ -271,7 +271,7 @@ public final class AsyncAggregationClient {
       return future;
     }
     AbstractAggregationCallback<Long> callback =
-      new AbstractAggregationCallback<>(future, req, AggregateService::getRowNum) {
+      new AbstractAggregationCallback<Long>(future, req, AggregateService::getRowNum) {
 
         private final AtomicLong count = new AtomicLong(0L);
 
@@ -304,7 +304,7 @@ public final class AsyncAggregationClient {
       return future;
     }
     AbstractAggregationCallback<S> callback =
-      new AbstractAggregationCallback<>(future, req, AggregateService::getSum) {
+      new AbstractAggregationCallback<S>(future, req, AggregateService::getSum) {
         private S sum;
         private final Object lock = new Object();
 
@@ -345,7 +345,7 @@ public final class AsyncAggregationClient {
       return future;
     }
     AbstractAggregationCallback<Double> callback =
-      new AbstractAggregationCallback<>(future, req, AggregateService::getAvg) {
+      new AbstractAggregationCallback<Double>(future, req, AggregateService::getAvg) {
         private S sum;
         long count = 0L;
         private final Object lock = new Object();
@@ -387,7 +387,7 @@ public final class AsyncAggregationClient {
       return future;
     }
     AbstractAggregationCallback<Double> callback =
-      new AbstractAggregationCallback<>(future, req, AggregateService::getStd) {
+      new AbstractAggregationCallback<Double>(future, req, AggregateService::getStd) {
 
         private S sum;
         private S sumSq;
@@ -436,7 +436,8 @@ public final class AsyncAggregationClient {
     }
     int firstPartIndex = scan.getFamilyMap().get(scan.getFamilies()[0]).size() - 1;
     AbstractAggregationCallback<NavigableMap<byte[], S>> callback =
-      new AbstractAggregationCallback<>(future, req, AggregateService::getMedian) {
+      new AbstractAggregationCallback<NavigableMap<byte[], S>>(future, req,
+        AggregateService::getMedian) {
 
         private final NavigableMap<byte[], S> map =
           Collections.synchronizedNavigableMap(new TreeMap<>(Bytes.BYTES_COMPARATOR));

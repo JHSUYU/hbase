@@ -143,7 +143,7 @@ public class TestProtobufUtil {
       Result result = Result.create(Collections.emptyList(), exists);
       result.setMetrics(new QueryMetrics(blockBytesScanned));
 
-      for (ClientProtos.Result proto : List.of(ProtobufUtil.toResult(result),
+      for (ClientProtos.Result proto : Arrays.asList(ProtobufUtil.toResult(result),
         ProtobufUtil.toResultNoData(result))) {
         assertEquals(exists, proto.hasExists() ? proto.getExists() : null);
         assertTrue(proto.hasMetrics());

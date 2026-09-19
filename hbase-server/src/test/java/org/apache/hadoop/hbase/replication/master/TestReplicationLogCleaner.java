@@ -406,7 +406,7 @@ public class TestReplicationLogCleaner {
 
   @Test
   public void testGetDeletableFilesWhenAsyncClusterConnectionClosed() throws ReplicationException {
-    List<FileStatus> files = List.of(new FileStatus());
+    List<FileStatus> files = Collections.singletonList(new FileStatus());
     assertFalse(services.getAsyncClusterConnection().isClosed());
     verify(services.getAsyncClusterConnection(), Mockito.times(1)).isClosed();
     cleaner.getDeletableFiles(files);

@@ -61,6 +61,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
 import org.apache.hbase.thirdparty.com.google.common.collect.Sets;
 
 @Tag(LargeTests.TAG)
@@ -110,7 +111,7 @@ public class TestIncrementalBackupWithContinuous extends TestBackupBase {
 
       // Run continuous backup
       LOG.info("Running full backup with continuous backup enabled on table: {}", tableName);
-      String backup1 = backupTables(BackupType.FULL, List.of(tableName), BACKUP_ROOT_DIR, true);
+      String backup1 = backupTables(BackupType.FULL, ImmutableList.of(tableName), BACKUP_ROOT_DIR, true);
       LOG.info("Full backup complete with ID {} for table: {}", backup1, tableName);
       assertTrue(checkSucceeded(backup1));
 
@@ -132,7 +133,7 @@ public class TestIncrementalBackupWithContinuous extends TestBackupBase {
       LOG.info("Run incremental backup now on table: {}", tableName);
       before = backupSystemTable.getBackupHistory().size();
       String backup2 =
-        backupTables(BackupType.INCREMENTAL, List.of(tableName), BACKUP_ROOT_DIR, true);
+        backupTables(BackupType.INCREMENTAL, ImmutableList.of(tableName), BACKUP_ROOT_DIR, true);
       assertTrue(checkSucceeded(backup2));
       LOG.info("Incremental backup completed for table: {}", tableName);
 
@@ -256,10 +257,10 @@ public class TestIncrementalBackupWithContinuous extends TestBackupBase {
       // The test starts with no data, and no bulk loaded rows.
       int expectedRowCount = 0;
       assertEquals(expectedRowCount, TEST_UTIL.countRows(tableName1));
-      assertTrue(systemTable.readBulkloadRows(List.of(tableName1)).isEmpty());
+      assertTrue(systemTable.readBulkloadRows(ImmutableList.of(tableName1)).isEmpty());
 
       // Create continuous backup, bulk loads are now being tracked
-      String backup1 = backupTables(BackupType.FULL, List.of(tableName1), BACKUP_ROOT_DIR, true);
+      String backup1 = backupTables(BackupType.FULL, ImmutableList.of(tableName1), BACKUP_ROOT_DIR, true);
       assertTrue(checkSucceeded(backup1));
 
       loadTable(TEST_UTIL.getConnection().getTable(tableName1));
@@ -267,18 +268,18 @@ public class TestIncrementalBackupWithContinuous extends TestBackupBase {
       performBulkLoad("bulkPreIncr", methodName, tableName1);
       expectedRowCount += ROWS_IN_BULK_LOAD;
       assertEquals(expectedRowCount, TEST_UTIL.countRows(tableName1));
-      assertTrue(systemTable.readBulkloadRows(List.of(tableName1)).isEmpty());
+      assertTrue(systemTable.readBulkloadRows(ImmutableList.of(tableName1)).isEmpty());
       loadTable(TEST_UTIL.getConnection().getTable(tableName1));
       Thread.sleep(15000);
 
       performBulkLoad("bulkPostIncr", methodName, tableName1);
-      assertTrue(systemTable.readBulkloadRows(List.of(tableName1)).isEmpty());
+      assertTrue(systemTable.readBulkloadRows(ImmutableList.of(tableName1)).isEmpty());
 
       // Incremental backup
       String backup2 =
-        backupTables(BackupType.INCREMENTAL, List.of(tableName1), BACKUP_ROOT_DIR, true);
+        backupTables(BackupType.INCREMENTAL, ImmutableList.of(tableName1), BACKUP_ROOT_DIR, true);
       assertTrue(checkSucceeded(backup2));
-      assertTrue(systemTable.readBulkloadRows(List.of(tableName1)).isEmpty());
+      assertTrue(systemTable.readBulkloadRows(ImmutableList.of(tableName1)).isEmpty());
 
       TEST_UTIL.truncateTable(tableName1);
       // Restore incremental backup

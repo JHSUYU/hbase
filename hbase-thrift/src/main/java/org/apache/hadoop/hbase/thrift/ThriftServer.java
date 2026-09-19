@@ -144,8 +144,6 @@ import org.apache.hbase.thirdparty.org.apache.thrift.transport.TServerSocket;
 import org.apache.hbase.thirdparty.org.apache.thrift.transport.TServerTransport;
 import org.apache.hbase.thirdparty.org.apache.thrift.transport.TTransportFactory;
 import org.apache.hbase.thirdparty.org.apache.thrift.transport.layered.TFramedTransport;
-import org.apache.hbase.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
-import org.apache.hbase.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
 import org.apache.hbase.thirdparty.org.eclipse.jetty.http.HttpVersion;
 import org.apache.hbase.thirdparty.org.eclipse.jetty.server.HttpConfiguration;
 import org.apache.hbase.thirdparty.org.eclipse.jetty.server.HttpConnectionFactory;
@@ -153,6 +151,8 @@ import org.apache.hbase.thirdparty.org.eclipse.jetty.server.SecureRequestCustomi
 import org.apache.hbase.thirdparty.org.eclipse.jetty.server.Server;
 import org.apache.hbase.thirdparty.org.eclipse.jetty.server.ServerConnector;
 import org.apache.hbase.thirdparty.org.eclipse.jetty.server.SslConnectionFactory;
+import org.apache.hbase.thirdparty.org.eclipse.jetty.servlet.ServletContextHandler;
+import org.apache.hbase.thirdparty.org.eclipse.jetty.servlet.ServletHolder;
 import org.apache.hbase.thirdparty.org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.apache.hbase.thirdparty.org.eclipse.jetty.util.thread.QueuedThreadPool;
 

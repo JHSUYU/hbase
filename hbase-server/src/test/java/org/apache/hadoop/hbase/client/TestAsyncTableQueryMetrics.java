@@ -99,7 +99,8 @@ public class TestAsyncTableQueryMetrics {
     Get g3 = new Get(ROW_3);
     g3.setQueryMetricsEnabled(true);
 
-    List<CompletableFuture<Result>> futures = CONN.getTable(TABLE_NAME).get(List.of(g1, g2, g3));
+    List<CompletableFuture<Result>> futures =
+      CONN.getTable(TABLE_NAME).get(Arrays.asList(g1, g2, g3));
 
     for (CompletableFuture<Result> future : futures) {
       result = future.join();
@@ -119,7 +120,7 @@ public class TestAsyncTableQueryMetrics {
     bbs += result.getMetrics().getBlockBytesScanned();
     assertEquals(getClusterBlockBytesScanned(), bbs);
 
-    futures = CONN.getTable(TABLE_NAME).get(List.of(g1, g2, g3));
+    futures = CONN.getTable(TABLE_NAME).get(Arrays.asList(g1, g2, g3));
     for (CompletableFuture<Result> future : futures) {
       result = future.join();
       assertEquals(Boolean.TRUE, result.getExists());
@@ -140,7 +141,8 @@ public class TestAsyncTableQueryMetrics {
     // Test multigets
     Get g2 = new Get(ROW_2);
     Get g3 = new Get(ROW_3);
-    List<CompletableFuture<Result>> futures = CONN.getTable(TABLE_NAME).get(List.of(g1, g2, g3));
+    List<CompletableFuture<Result>> futures =
+      CONN.getTable(TABLE_NAME).get(Arrays.asList(g1, g2, g3));
     futures.forEach(f -> assertNull(f.join().getMetrics()));
 
   }

@@ -54,74 +54,74 @@ public class TestCoprocessorConfigurationUtil {
 
   @Test
   public void testAddCoprocessorsEmptyCPList() {
-    CoprocessorConfigurationUtil.addCoprocessors(conf, key, List.of("cp1", "cp2"));
+    CoprocessorConfigurationUtil.addCoprocessors(conf, key, Arrays.asList("cp1", "cp2"));
     assertArrayEquals(new String[] { "cp1", "cp2" }, conf.getStrings(key));
   }
 
   @Test
   public void testAddCoprocessorsNonEmptyCPList() {
     conf.setStrings(key, "cp1");
-    CoprocessorConfigurationUtil.addCoprocessors(conf, key, List.of("cp1", "cp2"));
+    CoprocessorConfigurationUtil.addCoprocessors(conf, key, Arrays.asList("cp1", "cp2"));
     assertArrayEquals(new String[] { "cp1", "cp2" }, conf.getStrings(key));
   }
 
   @Test
   public void testAddCoprocessorsNoChange() {
     conf.setStrings(key, "cp1");
-    CoprocessorConfigurationUtil.addCoprocessors(conf, key, List.of("cp1"));
+    CoprocessorConfigurationUtil.addCoprocessors(conf, key, Arrays.asList("cp1"));
     assertArrayEquals(new String[] { "cp1" }, conf.getStrings(key));
   }
 
   @Test
   public void testAddCoprocessorsIdempotent() {
-    CoprocessorConfigurationUtil.addCoprocessors(conf, key, List.of("cp1", "cp2"));
+    CoprocessorConfigurationUtil.addCoprocessors(conf, key, Arrays.asList("cp1", "cp2"));
     // Call again
-    CoprocessorConfigurationUtil.addCoprocessors(conf, key, List.of("cp1", "cp2"));
+    CoprocessorConfigurationUtil.addCoprocessors(conf, key, Arrays.asList("cp1", "cp2"));
     assertArrayEquals(new String[] { "cp1", "cp2" }, conf.getStrings(key));
   }
 
   @Test
   public void testAddCoprocessorsIdempotentWithOverlap() {
-    CoprocessorConfigurationUtil.addCoprocessors(conf, key, List.of("cp1"));
-    CoprocessorConfigurationUtil.addCoprocessors(conf, key, List.of("cp1", "cp2"));
-    CoprocessorConfigurationUtil.addCoprocessors(conf, key, List.of("cp2"));
+    CoprocessorConfigurationUtil.addCoprocessors(conf, key, Arrays.asList("cp1"));
+    CoprocessorConfigurationUtil.addCoprocessors(conf, key, Arrays.asList("cp1", "cp2"));
+    CoprocessorConfigurationUtil.addCoprocessors(conf, key, Arrays.asList("cp2"));
     assertArrayEquals(new String[] { "cp1", "cp2" }, conf.getStrings(key));
   }
 
   @Test
   public void testRemoveCoprocessorsEmptyCPList() {
-    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, List.of("cp1"));
+    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, Arrays.asList("cp1"));
     assertNull(conf.getStrings(key));
   }
 
   @Test
   public void testRemoveCoprocessorsNonEmptyCPList() {
     conf.setStrings(key, "cp1", "cp2", "cp3");
-    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, List.of("cp2"));
+    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, Arrays.asList("cp2"));
     assertArrayEquals(new String[] { "cp1", "cp3" }, conf.getStrings(key));
   }
 
   @Test
   public void testRemoveCoprocessorsNoChange() {
     conf.setStrings(key, "cp1");
-    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, List.of("cp2"));
+    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, Arrays.asList("cp2"));
     assertArrayEquals(new String[] { "cp1" }, conf.getStrings(key));
   }
 
   @Test
   public void testRemoveCoprocessorsIdempotent() {
     conf.setStrings(key, "cp1", "cp2");
-    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, List.of("cp2"));
+    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, Arrays.asList("cp2"));
     // Call again
-    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, List.of("cp2"));
+    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, Arrays.asList("cp2"));
     assertArrayEquals(new String[] { "cp1" }, conf.getStrings(key));
   }
 
   @Test
   public void testRemoveCoprocessorsIdempotentWhenNotPresent() {
     conf.setStrings(key, "cp1");
-    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, List.of("cp2"));
-    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, List.of("cp2"));
+    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, Arrays.asList("cp2"));
+    CoprocessorConfigurationUtil.removeCoprocessors(conf, key, Arrays.asList("cp2"));
     assertArrayEquals(new String[] { "cp1" }, conf.getStrings(key));
   }
 
@@ -137,12 +137,12 @@ public class TestCoprocessorConfigurationUtil {
   @Test
   public void testSyncReadOnlyConfigurationsReadOnlyEnableAllKeys() {
     assertEnableReadOnlyMode(CoprocessorHost.MASTER_COPROCESSOR_CONF_KEY,
-      List.of(MasterReadOnlyController.class.getName()));
+      Arrays.asList(MasterReadOnlyController.class.getName()));
 
     assertEnableReadOnlyMode(CoprocessorHost.REGIONSERVER_COPROCESSOR_CONF_KEY,
-      List.of(RegionServerReadOnlyController.class.getName()));
+      Arrays.asList(RegionServerReadOnlyController.class.getName()));
     assertEnableReadOnlyMode(CoprocessorHost.REGION_COPROCESSOR_CONF_KEY,
-      List.of(RegionReadOnlyController.class.getName(), BulkLoadReadOnlyController.class.getName(),
+      Arrays.asList(RegionReadOnlyController.class.getName(), BulkLoadReadOnlyController.class.getName(),
         EndpointReadOnlyController.class.getName()));
   }
 
@@ -157,13 +157,13 @@ public class TestCoprocessorConfigurationUtil {
   @Test
   public void testSyncReadOnlyConfigurationsReadOnlyDisableAllKeys() {
     assertDisableReadOnlyMode(CoprocessorHost.MASTER_COPROCESSOR_CONF_KEY,
-      List.of(MasterReadOnlyController.class.getName()));
+      Arrays.asList(MasterReadOnlyController.class.getName()));
 
     assertDisableReadOnlyMode(CoprocessorHost.REGIONSERVER_COPROCESSOR_CONF_KEY,
-      List.of(RegionServerReadOnlyController.class.getName()));
+      Arrays.asList(RegionServerReadOnlyController.class.getName()));
 
     assertDisableReadOnlyMode(CoprocessorHost.REGION_COPROCESSOR_CONF_KEY,
-      List.of(RegionReadOnlyController.class.getName(), BulkLoadReadOnlyController.class.getName(),
+      Arrays.asList(RegionReadOnlyController.class.getName(), BulkLoadReadOnlyController.class.getName(),
         EndpointReadOnlyController.class.getName()));
   }
 

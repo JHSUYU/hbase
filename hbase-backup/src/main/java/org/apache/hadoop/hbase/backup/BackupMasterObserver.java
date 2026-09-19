@@ -42,6 +42,7 @@ import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
 import org.apache.hbase.thirdparty.com.google.common.collect.Sets;
 
 /**
@@ -107,9 +108,9 @@ public class BackupMasterObserver implements MasterCoprocessor, MasterObserver {
     Predicate<BulkLoad> filter) throws IOException {
     try (Connection connection = ConnectionFactory.createConnection(config);
       BackupSystemTable tbl = new BackupSystemTable(connection)) {
-      List<BulkLoad> bulkLoads = tbl.readBulkloadRows(List.of(tableName));
+      List<BulkLoad> bulkLoads = tbl.readBulkloadRows(ImmutableList.of(tableName));
       List<byte[]> rowsToDelete =
-        bulkLoads.stream().filter(filter).map(BulkLoad::getRowKey).toList();
+        bulkLoads.stream().filter(filter).map(BulkLoad::getRowKey).collect(Collectors.toList());
       tbl.deleteBulkLoadedRows(rowsToDelete);
     }
   }

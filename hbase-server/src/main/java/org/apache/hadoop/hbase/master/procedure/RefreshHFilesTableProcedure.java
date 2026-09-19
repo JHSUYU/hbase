@@ -120,12 +120,16 @@ public class RefreshHFilesTableProcedure
     LOG.info("Executing RefreshHFilesTableProcedureState state: {}", state);
 
     try {
-      return switch (state) {
-        case REFRESH_HFILES_PREPARE -> prepare(env);
-        case REFRESH_HFILES_REFRESH_REGION -> refreshHFiles(env);
-        case REFRESH_HFILES_FINISH -> finish();
-        default -> throw new UnsupportedOperationException("Unhandled state: " + state);
-      };
+      switch (state) {
+        case REFRESH_HFILES_PREPARE:
+          return prepare(env);
+        case REFRESH_HFILES_REFRESH_REGION:
+          return refreshHFiles(env);
+        case REFRESH_HFILES_FINISH:
+          return finish();
+        default:
+          throw new UnsupportedOperationException("Unhandled state: " + state);
+      }
     } catch (Exception ex) {
       LOG.error("Error in RefreshHFilesTableProcedure state {}", state, ex);
       setFailure("RefreshHFilesTableProcedure", ex);

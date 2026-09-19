@@ -183,7 +183,8 @@ public abstract class AbstractPitrRestoreHandler {
   private void validateContinuousBackup(TableName[] tables,
     Map<TableName, Long> continuousBackupTables) throws IOException {
     List<TableName> missingTables =
-      Arrays.stream(tables).filter(table -> !continuousBackupTables.containsKey(table)).toList();
+      Arrays.stream(tables).filter(table -> !continuousBackupTables.containsKey(table))
+        .collect(Collectors.toList());
 
     if (!missingTables.isEmpty()) {
       String errorMsg = "Continuous Backup is not enabled for the following tables: "

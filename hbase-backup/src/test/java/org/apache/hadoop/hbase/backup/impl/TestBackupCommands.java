@@ -51,6 +51,10 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableMap;
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableSet;
+
 @Tag(SmallTests.TAG)
 public class TestBackupCommands extends TestBackupBase {
   String backupWalDirName = "TestBackupWalDir";
@@ -79,7 +83,7 @@ public class TestBackupCommands extends TestBackupBase {
     full2.setState(BackupInfo.BackupState.COMPLETE);
 
     // Ordered as newest to oldest, will be reversed in the method
-    List<BackupInfo> backupInfos = List.of(full2, inc, full1);
+    List<BackupInfo> backupInfos = ImmutableList.of(full2, inc, full1);
     when(sysTable.getBackupHistory(any())).thenReturn(new ArrayList<>(backupInfos));
 
     // WHEN
@@ -102,7 +106,7 @@ public class TestBackupCommands extends TestBackupBase {
     long cutoffTimestamp = 1_000_000L;
 
     // Simulate current table start times
-    Map<TableName, Long> tableSet = Map.of(tableA, 900_000L, // Before cutoff → should be updated
+    Map<TableName, Long> tableSet = ImmutableMap.of(tableA, 900_000L, // Before cutoff → should be updated
       tableB, 1_100_000L, // After cutoff → should NOT be updated
       tableC, 800_000L // Before cutoff → should be updated
     );
@@ -114,7 +118,7 @@ public class TestBackupCommands extends TestBackupBase {
     command.updateBackupTableStartTimes(mockSysTable, cutoffTimestamp);
 
     // THEN
-    Set<TableName> expectedUpdated = Set.of(tableA, tableC);
+    Set<TableName> expectedUpdated = ImmutableSet.of(tableA, tableC);
     verify(mockSysTable).updateContinuousBackupTableSet(expectedUpdated, cutoffTimestamp);
   }
 

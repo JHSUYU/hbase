@@ -19,6 +19,8 @@ package org.apache.hadoop.hbase.master.assignment;
 
 import com.google.errorprone.annotations.RestrictedApi;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -42,10 +44,10 @@ public class RegionInTransitionTracker {
   private static final Logger LOG = LoggerFactory.getLogger(RegionInTransitionTracker.class);
 
   private static final List<RegionState.State> DISABLE_TABLE_REGION_STATE =
-    List.of(RegionState.State.OFFLINE, RegionState.State.CLOSED);
+    Collections.unmodifiableList(Arrays.asList(RegionState.State.OFFLINE, RegionState.State.CLOSED));
 
   private static final List<RegionState.State> ENABLE_TABLE_REGION_STATE =
-    List.of(RegionState.State.OPEN);
+    Collections.singletonList(RegionState.State.OPEN);
 
   // DO NOT USE containsKey()/remove() on regionInTransition with a RegionInfo instance whose
   // offline flag differs from the one stored as the key: RegionInfo#equals and #hashCode both

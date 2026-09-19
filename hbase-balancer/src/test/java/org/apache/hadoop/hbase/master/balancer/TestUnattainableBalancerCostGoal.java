@@ -24,7 +24,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.function.Function;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
@@ -37,6 +37,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableSet;
 
 /**
  * If your minCostNeedsBalance is set too low, then the balancer should still eventually stop making
@@ -92,7 +94,8 @@ public class TestUnattainableBalancerCostGoal {
   public void testSystemTableIsolation() {
     Configuration conf = new Configuration(false);
     conf.setBoolean(BalancerConditionals.ISOLATE_SYSTEM_TABLES_KEY, true);
-    runBalancerToExhaustion(conf, serverToRegions, Set.of(this::isSystemTableIsolated),
+    runBalancerToExhaustion(conf, serverToRegions,
+      ImmutableSet.<Function<BalancerClusterState, Boolean>>of(this::isSystemTableIsolated),
       UNACHIEVABLE_COST_GOAL, 10_000, CandidateGeneratorTestUtil.ExhaustionType.NO_MORE_MOVES);
     LOG.info("Meta table regions are successfully isolated.");
   }

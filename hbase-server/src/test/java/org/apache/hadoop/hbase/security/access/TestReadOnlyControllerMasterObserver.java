@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.security.access;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -107,7 +108,7 @@ public class TestReadOnlyControllerMasterObserver {
     family = Bytes.toBytes("testFamily");
     splitRow = Bytes.toBytes("splitRow");
     splitKey = Bytes.toBytes("splitKey");
-    metaEntries = List.of();
+    metaEntries = Collections.emptyList();
     regionsToMerge = new RegionInfo[] {};
     snapshot = mock(SnapshotDescription.class);
     tableDescriptor = mock(TableDescriptor.class);
@@ -118,15 +119,15 @@ public class TestReadOnlyControllerMasterObserver {
     userName = "testUser";
     quotas = mock(GlobalQuotaSettings.class);
     regionServer = "testRegionServer";
-    servers = Set.of();
-    tables = Set.of();
+    servers = Collections.emptySet();
+    tables = Collections.emptySet();
     targetGroup = "targetGroup";
     name = "testRSGroup";
     groupName = "testGroupName";
     request = BalanceRequest.newBuilder().build();
     oldName = "oldRSGroupName";
     newName = "newRSGroupName";
-    configuration = Map.of();
+    configuration = Collections.emptyMap();
     peerId = "testPeerId";
     peerConfig = mock(ReplicationPeerConfig.class);
     state = SyncReplicationState.NONE;

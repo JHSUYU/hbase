@@ -3732,7 +3732,7 @@ public class MasterRpcServices extends HBaseRpcServicesBase<HMaster>
       String snapshotName = restoreBackupSystemTableRequest.getSnapshotName();
       SnapshotDescription snapshot = server.snapshotManager.getCompletedSnapshots().stream()
         .filter(s -> s.getName().equals(snapshotName)).findFirst()
-        .orElseThrow(() -> new ServiceException("Snapshot %s not found".formatted(snapshotName)));
+        .orElseThrow(() -> new ServiceException(String.format("Snapshot %s not found", snapshotName)));
       long pid = server.getMasterProcedureExecutor()
         .submitProcedure(new RestoreBackupSystemTableProcedure(snapshot));
       return MasterProtos.RestoreBackupSystemTableResponse.newBuilder().setProcId(pid).build();

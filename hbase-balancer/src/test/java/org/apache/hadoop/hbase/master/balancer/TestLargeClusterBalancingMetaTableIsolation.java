@@ -24,7 +24,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.function.Function;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
@@ -39,6 +39,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableSet;
 
 @Tag(MediumTests.TAG)
 @Tag(MasterTests.TAG)
@@ -88,7 +90,8 @@ public class TestLargeClusterBalancingMetaTableIsolation {
     Configuration conf = new Configuration(false);
     conf.setClass("hbase.util.ip.to.rack.determiner", MockMapping.class, DNSToSwitchMapping.class);
     conf.setBoolean(BalancerConditionals.ISOLATE_META_TABLE_KEY, true);
-    runBalancerToExhaustion(conf, serverToRegions, Set.of(this::isMetaTableIsolated), 10.0f);
+    runBalancerToExhaustion(conf, serverToRegions,
+      ImmutableSet.<Function<BalancerClusterState, Boolean>>of(this::isMetaTableIsolated), 10.0f);
     LOG.info("Meta table regions are successfully isolated.");
   }
 

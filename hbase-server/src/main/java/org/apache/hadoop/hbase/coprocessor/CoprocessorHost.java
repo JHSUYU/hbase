@@ -502,6 +502,20 @@ public abstract class CoprocessorHost<C extends Coprocessor, E extends Coprocess
   public interface ObserverGetter<C, O> extends Function<C, Optional<O>> {
   }
 
+  private static ObserverRpcCallContext createRpcCallContext() {
+    return RpcServer.getRequestUser()
+      .map(user -> new ObserverRpcCallContextImpl(user, RpcServer.getConnectionAttributes()))
+      .orElse(null);
+  }
+
+  private static ObserverRpcCallContext createRpcCallContext(User user) {
+    if (user == null) {
+      return null;
+    } else {
+      return new ObserverRpcCallContextImpl(user, RpcServer.getConnectionAttributes());
+    }
+  }
+
   private abstract class ObserverOperation<O> extends ObserverContextImpl<E> {
     ObserverGetter<C, O> observerGetter;
 
@@ -529,20 +543,6 @@ public abstract class CoprocessorHost<C extends Coprocessor, E extends Coprocess
       boolean bypassable) {
       super(rpcCallContext != null ? rpcCallContext : createRpcCallContext(), bypassable);
       this.observerGetter = observerGetter;
-    }
-
-    private static ObserverRpcCallContext createRpcCallContext() {
-      return RpcServer.getRequestUser()
-        .map(user -> new ObserverRpcCallContextImpl(user, RpcServer.getConnectionAttributes()))
-        .orElse(null);
-    }
-
-    private static ObserverRpcCallContext createRpcCallContext(User user) {
-      if (user == null) {
-        return null;
-      } else {
-        return new ObserverRpcCallContextImpl(user, RpcServer.getConnectionAttributes());
-      }
     }
 
     abstract void callObserver() throws IOException;

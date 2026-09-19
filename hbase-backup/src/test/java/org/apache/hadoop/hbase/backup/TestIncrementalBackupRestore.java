@@ -48,6 +48,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
 import org.apache.hbase.thirdparty.com.google.common.collect.Lists;
 import org.apache.hbase.thirdparty.com.google.common.collect.Sets;
 
@@ -147,7 +148,7 @@ public class TestIncrementalBackupRestore extends IncrementalBackupRestoreTestBa
       final List<TableName> tablesCopy = tables;
       IOException ex = assertThrows(IOException.class, () -> client
         .backupTables(createBackupRequest(BackupType.INCREMENTAL, tablesCopy, BACKUP_ROOT_DIR)));
-      checkThrowsCFMismatch(ex, List.of(table1));
+      checkThrowsCFMismatch(ex, ImmutableList.of(table1));
       takeFullBackup(tables, client);
 
       int NB_ROWS_FAM2 = 7;

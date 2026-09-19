@@ -33,6 +33,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import org.apache.hadoop.hbase.util.ProcessUtils;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -184,7 +185,7 @@ public class ProfileServlet extends HttpServlet {
   // lock and flag as the first — both gate the same JVM-global AsyncProfiler singleton.
   private static final Lock profilerLock = new ReentrantLock();
   private static volatile boolean profiling;
-  private final long currentPid = ProcessHandle.current().pid();
+  private final long currentPid = ProcessUtils.getCurrentPid();
   @edu.umd.cs.findbugs.annotations.SuppressWarnings(value = "SE_BAD_FIELD",
       justification = "This class is never serialized nor restored.")
   private final ProfilerBackend backend;

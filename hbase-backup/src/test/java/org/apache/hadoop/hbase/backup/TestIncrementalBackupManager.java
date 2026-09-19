@@ -41,6 +41,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
+
 @Tag(LargeTests.TAG)
 public class TestIncrementalBackupManager extends TestBackupBase {
 
@@ -67,7 +69,7 @@ public class TestIncrementalBackupManager extends TestBackupBase {
   private void testCollectWALFiles(boolean separateOldLogDir) throws Exception {
     Configuration testConf = new Configuration(conf1);
     testConf.setBoolean(AbstractFSWALProvider.SEPARATE_OLDLOGDIR, separateOldLogDir);
-    List<TableName> tables = List.of(table1);
+    List<TableName> tables = ImmutableList.of(table1);
     try (Connection conn = ConnectionFactory.createConnection(testConf);
       BackupAdminImpl backupAdmin = new BackupAdminImpl(conn)) {
       String fullBackupId =

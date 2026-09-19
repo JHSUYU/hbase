@@ -86,7 +86,7 @@ final class BalancerConditionals implements Configurable {
   }
 
   Set<Class<? extends RegionPlanConditional>> getConditionalClasses() {
-    return Set.copyOf(conditionalClasses);
+    return ImmutableSet.copyOf(conditionalClasses);
   }
 
   Collection<RegionPlanConditional> getConditionals() {

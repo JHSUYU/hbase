@@ -29,6 +29,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
@@ -93,7 +94,8 @@ public class TestDebugDumpRedaction {
   // Combine all properties we want to redact into one list
   private static final List<String> REDACTED_PROPS =
     Stream.of(SENSITIVE_CONF_PROPERTIES, NON_SENSITIVE_KEYS_WITH_DEFAULT_VALUES,
-      List.of(NULL_CONFIG_KEY, EMPTY_CONFIG_KEY)).flatMap(Collection::stream).toList();
+      Arrays.asList(NULL_CONFIG_KEY, EMPTY_CONFIG_KEY)).flatMap(Collection::stream)
+      .collect(Collectors.toList());
 
   private static LocalHBaseCluster CLUSTER;
 

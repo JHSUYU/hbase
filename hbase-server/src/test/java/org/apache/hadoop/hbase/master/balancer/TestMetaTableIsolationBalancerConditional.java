@@ -99,7 +99,7 @@ public class TestMetaTableIsolationBalancerConditional {
       } catch (IOException e) {
         throw new RuntimeException(e);
       }
-    }).flatMap(Collection::stream).toList();
+    }).flatMap(Collection::stream).collect(Collectors.toList());
     String targetServer =
       TEST_UTIL.getHBaseCluster().getRegionServer(0).getServerName().getServerName();
     for (RegionInfo region : allRegions) {
@@ -141,9 +141,9 @@ public class TestMetaTableIsolationBalancerConditional {
     TableName productTableName, boolean shouldBeBalanced) {
     // Validate that the region assignments
     ServerName metaServer =
-      tableToServers.get(TableName.META_TABLE_NAME).stream().findFirst().orElseThrow();
+      tableToServers.get(TableName.META_TABLE_NAME).stream().findFirst().get();
     ServerName quotaServer =
-      tableToServers.get(QuotaUtil.QUOTA_TABLE_NAME).stream().findFirst().orElseThrow();
+      tableToServers.get(QuotaUtil.QUOTA_TABLE_NAME).stream().findFirst().get();
     Set<ServerName> productServers = tableToServers.get(productTableName);
 
     if (shouldBeBalanced) {

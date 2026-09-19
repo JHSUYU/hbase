@@ -52,6 +52,9 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableMap;
+
 @Tag(LargeTests.TAG)
 public class TestBackupLogCleaner extends TestBackupBase {
 
@@ -70,9 +73,9 @@ public class TestBackupLogCleaner extends TestBackupBase {
     Path backupRoot1 = new Path(BACKUP_ROOT_DIR, "root1");
     Path backupRoot2 = new Path(BACKUP_ROOT_DIR, "root2");
 
-    List<TableName> tableSetFull = List.of(table1, table2, table3, table4);
-    List<TableName> tableSet14 = List.of(table1, table4);
-    List<TableName> tableSet23 = List.of(table2, table3);
+    List<TableName> tableSetFull = ImmutableList.of(table1, table2, table3, table4);
+    List<TableName> tableSet14 = ImmutableList.of(table1, table4);
+    List<TableName> tableSet23 = ImmutableList.of(table2, table3);
 
     try (BackupSystemTable systemTable = new BackupSystemTable(TEST_UTIL.getConnection())) {
       // Verify that we have no backup sessions yet
@@ -80,7 +83,7 @@ public class TestBackupLogCleaner extends TestBackupBase {
 
       BackupLogCleaner cleaner = new BackupLogCleaner();
       cleaner.setConf(TEST_UTIL.getConfiguration());
-      cleaner.init(Map.of(HMaster.MASTER, TEST_UTIL.getHBaseCluster().getMaster()));
+      cleaner.init(ImmutableMap.of(HMaster.MASTER, TEST_UTIL.getHBaseCluster().getMaster()));
 
       // All WAL files can be deleted because we do not have backups
       List<FileStatus> walFilesBeforeBackup = getListOfWALFiles(TEST_UTIL.getConfiguration());
@@ -208,7 +211,7 @@ public class TestBackupLogCleaner extends TestBackupBase {
   @Test
   public void testDoesNotDeleteWALsFromNewServers() throws Exception {
     Path backupRoot1 = new Path(BACKUP_ROOT_DIR, "backup1");
-    List<TableName> tableSetFull = List.of(table1, table2, table3, table4);
+    List<TableName> tableSetFull = ImmutableList.of(table1, table2, table3, table4);
 
     JVMClusterUtil.RegionServerThread rsThread = null;
     try (BackupSystemTable systemTable = new BackupSystemTable(TEST_UTIL.getConnection())) {
@@ -263,7 +266,7 @@ public class TestBackupLogCleaner extends TestBackupBase {
 
       BackupLogCleaner cleaner = new BackupLogCleaner();
       cleaner.setConf(TEST_UTIL.getConfiguration());
-      cleaner.init(Map.of(HMaster.MASTER, TEST_UTIL.getHBaseCluster().getMaster()));
+      cleaner.init(ImmutableMap.of(HMaster.MASTER, TEST_UTIL.getHBaseCluster().getMaster()));
 
       Set<FileStatus> deletable = toSet(cleaner.getDeletableFiles(walsAfterNewServer));
       for (FileStatus newWAL : newServerWALs) {
@@ -288,9 +291,9 @@ public class TestBackupLogCleaner extends TestBackupBase {
     BackupInfo backup = new BackupInfo();
     backup.setState(BackupInfo.BackupState.COMPLETE);
     backup.setTableSetTimestampMap(
-      Map.of(TableName.valueOf("table1"), Map.of("server1:60020", 1000000L)));
+      ImmutableMap.of(TableName.valueOf("table1"), ImmutableMap.of("server1:60020", 1000000L)));
     BackupBoundaries boundaries =
-      BackupLogCleaner.calculatePreservationBoundary(List.of(backup), 0L);
+      BackupLogCleaner.calculatePreservationBoundary(ImmutableList.of(backup), 0L);
 
     // Old WAL from before the backup
     Path oldWAL = new Path("/hbase/oldWALs/server1%2C60020%2C12345.500000");
@@ -322,7 +325,7 @@ public class TestBackupLogCleaner extends TestBackupBase {
     // Running backups have no TableSetTimestampMap
 
     BackupBoundaries boundaries =
-      BackupLogCleaner.calculatePreservationBoundary(List.of(backup), 5L);
+      BackupLogCleaner.calculatePreservationBoundary(ImmutableList.of(backup), 5L);
 
     // There's only a single backup, and it is still running, so it's a FULL backup.
     // We expect files preceding the snapshot are deletable, but files after the start are not.
@@ -341,9 +344,9 @@ public class TestBackupLogCleaner extends TestBackupBase {
     backup2.setState(BackupInfo.BackupState.COMPLETE);
     backup2.setStartTs(80L);
     backup2
-      .setTableSetTimestampMap(Map.of(TableName.valueOf("table1"), Map.of("server1:60020", 90L)));
+      .setTableSetTimestampMap(ImmutableMap.of(TableName.valueOf("table1"), ImmutableMap.of("server1:60020", 90L)));
 
-    boundaries = BackupLogCleaner.calculatePreservationBoundary(List.of(backup, backup2), 5L);
+    boundaries = BackupLogCleaner.calculatePreservationBoundary(ImmutableList.of(backup, backup2), 5L);
 
     path = new Path("/hbase/oldWALs/server1%2C60020%2C12345.89");
     assertTrue(BackupLogCleaner.canDeleteFile(boundaries, path));

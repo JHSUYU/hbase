@@ -377,7 +377,7 @@ public class IncrementalTableBackupClient extends TableBackupClient {
         // continuous backups require a list of source directories and a different destination
         // directory when copying HFiles to the incremental backup directory.
         List<String> uniqueNamespaces = tablesToWALFileList.keySet().stream()
-          .map(TableName::getNamespaceAsString).distinct().toList();
+          .map(TableName::getNamespaceAsString).distinct().collect(Collectors.toList());
         bulkOutputFiles = uniqueNamespaces.stream()
           .map(ns -> new Path(getBulkOutputDir(), ns).toString()).toArray(String[]::new);
         backupDest = backupDest + Path.SEPARATOR + backupId;

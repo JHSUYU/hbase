@@ -59,6 +59,10 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableMap;
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableSet;
+
 /**
  * Unit tests for {@link BackupAdminImpl}.
  * <p>
@@ -90,7 +94,7 @@ public class TestBackupAdminImpl {
       new HashSet<>(Arrays.asList(TableName.valueOf("ns:table1"), TableName.valueOf("ns:table2")));
 
     Map<TableName, List<BackupInfo>> backupHistory = new HashMap<>();
-    backupHistory.put(TableName.valueOf("ns:table1"), List.of(new BackupInfo())); // Only table1
+    backupHistory.put(TableName.valueOf("ns:table1"), ImmutableList.of(new BackupInfo())); // Only table1
                                                                                   // retained
 
     when(mockTable.getIncrementalBackupTableSet(backupRoot))
@@ -122,10 +126,10 @@ public class TestBackupAdminImpl {
   @Test
   public void testFinalizeDelete_retainedSetEmpty_doesNotAddBack() throws IOException {
     String backupRoot = "backupRoot2";
-    List<String> backupRoots = List.of(backupRoot);
+    List<String> backupRoots = ImmutableList.of(backupRoot);
 
-    Set<TableName> initialTableSet = Set.of(TableName.valueOf("ns:tableX"));
-    Map<TableName, List<BackupInfo>> backupHistory = Map.of(); // No overlap
+    Set<TableName> initialTableSet = ImmutableSet.of(TableName.valueOf("ns:tableX"));
+    Map<TableName, List<BackupInfo>> backupHistory = ImmutableMap.of(); // No overlap
 
     when(mockTable.getIncrementalBackupTableSet(backupRoot))
       .thenReturn(new HashSet<>(initialTableSet));
@@ -149,26 +153,26 @@ public class TestBackupAdminImpl {
   public void testFinalizeDelete_multipleRoots() throws IOException {
     String root1 = "root1";
     String root2 = "root2";
-    List<String> roots = List.of(root1, root2);
+    List<String> roots = ImmutableList.of(root1, root2);
 
     TableName t1 = TableName.valueOf("ns:table1");
     TableName t2 = TableName.valueOf("ns:table2");
 
     // root1 setup
-    when(mockTable.getIncrementalBackupTableSet(root1)).thenReturn(new HashSet<>(List.of(t1)));
-    when(mockTable.getBackupHistoryForTableSet(Set.of(t1), root1))
-      .thenReturn(Map.of(t1, List.of(new BackupInfo())));
+    when(mockTable.getIncrementalBackupTableSet(root1)).thenReturn(new HashSet<>(ImmutableList.of(t1)));
+    when(mockTable.getBackupHistoryForTableSet(ImmutableSet.of(t1), root1))
+      .thenReturn(ImmutableMap.of(t1, ImmutableList.of(new BackupInfo())));
 
     // root2 setup
-    when(mockTable.getIncrementalBackupTableSet(root2)).thenReturn(new HashSet<>(List.of(t2)));
-    when(mockTable.getBackupHistoryForTableSet(Set.of(t2), root2)).thenReturn(Map.of()); // empty
+    when(mockTable.getIncrementalBackupTableSet(root2)).thenReturn(new HashSet<>(ImmutableList.of(t2)));
+    when(mockTable.getBackupHistoryForTableSet(ImmutableSet.of(t2), root2)).thenReturn(ImmutableMap.of()); // empty
                                                                                          // history
 
     backupAdminImpl.finalizeDelete(roots, mockTable);
 
     // root1: should delete and re-add table
     verify(mockTable).deleteIncrementalBackupTableSet(root1);
-    verify(mockTable).addIncrementalBackupTableSet(Set.of(t1), root1);
+    verify(mockTable).addIncrementalBackupTableSet(ImmutableSet.of(t1), root1);
 
     // root2: delete only
     verify(mockTable).deleteIncrementalBackupTableSet(root2);
@@ -262,12 +266,12 @@ public class TestBackupAdminImpl {
     BackupInfo b3 = createBackupInfo("backup_003", 3000L, BackupType.INCREMENTAL, table);
     BackupInfo b4 = createBackupInfo("backup_004", 4000L, BackupType.INCREMENTAL, table);
 
-    when(mockTable.getBackupHistory(any())).thenReturn(List.of(b4, b3, b2, b1, b0));
+    when(mockTable.getBackupHistory(any())).thenReturn(ImmutableList.of(b4, b3, b2, b1, b0));
 
     List<BackupInfo> result = backupAdminImpl.getAffectedBackupSessions(current, table, mockTable);
 
     assertEquals(2, result.size());
-    assertTrue(result.containsAll(List.of(b3, b4)));
+    assertTrue(result.containsAll(ImmutableList.of(b3, b4)));
   }
 
   /**
@@ -289,7 +293,7 @@ public class TestBackupAdminImpl {
     BackupInfo b2 = createBackupInfo("backup_002", 2000L, BackupType.FULL, table);
     BackupInfo b3 = createBackupInfo("backup_003", 3000L, BackupType.INCREMENTAL, table);
 
-    when(mockTable.getBackupHistory(any())).thenReturn(List.of(b3, b2, b1, b0));
+    when(mockTable.getBackupHistory(any())).thenReturn(ImmutableList.of(b3, b2, b1, b0));
 
     List<BackupInfo> result = backupAdminImpl.getAffectedBackupSessions(current, table, mockTable);
 
@@ -316,12 +320,12 @@ public class TestBackupAdminImpl {
       TableName.valueOf("other_table"));
     BackupInfo b4 = createBackupInfo("backup_004", 4000L, BackupType.INCREMENTAL, table);
 
-    when(mockTable.getBackupHistory(any())).thenReturn(List.of(b4, b3, b2, b1, b0));
+    when(mockTable.getBackupHistory(any())).thenReturn(ImmutableList.of(b4, b3, b2, b1, b0));
 
     List<BackupInfo> result = backupAdminImpl.getAffectedBackupSessions(current, table, mockTable);
 
     assertEquals(2, result.size());
-    assertTrue(result.containsAll(List.of(b2, b4)));
+    assertTrue(result.containsAll(ImmutableList.of(b2, b4)));
   }
 
   /**
@@ -345,14 +349,14 @@ public class TestBackupAdminImpl {
     BackupInfo b3 = createBackupInfo("backup_003", 3000L, BackupType.INCREMENTAL, table);
     BackupInfo b4 = createBackupInfo("backup_004", 4000L, BackupType.INCREMENTAL, table);
 
-    when(mockTable.getBackupHistory(any())).thenReturn(List.of(b4, b3, b2, b1, b0));
+    when(mockTable.getBackupHistory(any())).thenReturn(ImmutableList.of(b4, b3, b2, b1, b0));
 
     List<BackupInfo> result = backupAdminImpl.getAffectedBackupSessions(current, table, mockTable);
 
     // Full backup of other table should not reset, so we expect both incremental backups after
     // current
     assertEquals(2, result.size());
-    assertTrue(result.containsAll(List.of(b3, b4)));
+    assertTrue(result.containsAll(ImmutableList.of(b3, b4)));
   }
 
   private BackupInfo createBackupInfo(String id, long ts, BackupType type, TableName... tables) {
@@ -378,7 +382,7 @@ public class TestBackupAdminImpl {
 
     BackupInfo info = new BackupInfo();
     info.setBackupId("backup_001");
-    info.setTables(List.of(tableToRemove, remainingTable));
+    info.setTables(ImmutableList.of(tableToRemove, remainingTable));
     info.setBackupRootDir("/backup/root");
 
     BackupSystemTable sysTable = mock(BackupSystemTable.class);
@@ -421,7 +425,7 @@ public class TestBackupAdminImpl {
 
     BackupInfo info = new BackupInfo();
     info.setBackupId("backup_002");
-    info.setTables(new ArrayList<>(List.of(onlyTable)));
+    info.setTables(new ArrayList<>(ImmutableList.of(onlyTable)));
     info.setBackupRootDir("/backup/root");
 
     BackupSystemTable sysTable = mock(BackupSystemTable.class);
@@ -474,7 +478,7 @@ public class TestBackupAdminImpl {
     BackupInfo info = new BackupInfo();
     info.setBackupId(backupId);
     info.setBackupRootDir("/backup/root");
-    info.setTables(List.of(table));
+    info.setTables(ImmutableList.of(table));
     info.setStartTs(1000L);
     info.setType(BackupType.FULL);
 
@@ -486,7 +490,7 @@ public class TestBackupAdminImpl {
 
     when(sysTable.readBackupInfo(backupId)).thenReturn(info);
     when(backupAdminImpl.isLastBackupSession(sysTable, table, 1000L)).thenReturn(true);
-    when(sysTable.readBulkLoadedFiles(backupId)).thenReturn(Map.of());
+    when(sysTable.readBulkLoadedFiles(backupId)).thenReturn(ImmutableMap.of());
 
     doNothing().when(sysTable).deleteBackupInfo(backupId);
 
@@ -513,14 +517,14 @@ public class TestBackupAdminImpl {
     BackupInfo current = new BackupInfo();
     current.setBackupId(backupId);
     current.setBackupRootDir("/backup/root");
-    current.setTables(List.of(table));
+    current.setTables(ImmutableList.of(table));
     current.setStartTs(2000L);
     current.setType(BackupType.INCREMENTAL);
 
     BackupInfo dependent = new BackupInfo();
     dependent.setBackupId("backup_inc_002");
     dependent.setBackupRootDir("/backup/root");
-    dependent.setTables(new ArrayList<>(List.of(table)));
+    dependent.setTables(new ArrayList<>(ImmutableList.of(table)));
     dependent.setStartTs(3000L);
     dependent.setType(BackupType.INCREMENTAL);
 
@@ -531,9 +535,9 @@ public class TestBackupAdminImpl {
     backupAdminImpl = spy(new BackupAdminImpl(mockConn));
 
     when(sysTable.readBackupInfo(backupId)).thenReturn(current);
-    when(sysTable.readBulkLoadedFiles(backupId)).thenReturn(Map.of());
+    when(sysTable.readBulkLoadedFiles(backupId)).thenReturn(ImmutableMap.of());
     when(backupAdminImpl.isLastBackupSession(sysTable, table, 2000L)).thenReturn(false);
-    doReturn(List.of(dependent)).when(backupAdminImpl).getAffectedBackupSessions(current, table,
+    doReturn(ImmutableList.of(dependent)).when(backupAdminImpl).getAffectedBackupSessions(current, table,
       sysTable);
 
     doNothing().when(backupAdminImpl).removeTableFromBackupImage(eq(dependent), eq(table),
@@ -561,13 +565,13 @@ public class TestBackupAdminImpl {
     TableName table = TableName.valueOf("ns", "t1");
     String backupId = "backup_with_bulkload";
     Path dummyPath = new Path("/bulk/load/file1");
-    Map<byte[], String> bulkFiles = Map.of("k1".getBytes(), dummyPath.toString());
+    Map<byte[], String> bulkFiles = ImmutableMap.of("k1".getBytes(), dummyPath.toString());
 
     // BackupInfo mock
     BackupInfo info = new BackupInfo();
     info.setBackupId(backupId);
     info.setBackupRootDir("/backup/root");
-    info.setTables(List.of(table));
+    info.setTables(ImmutableList.of(table));
     info.setStartTs(1500L);
     info.setType(BackupType.FULL);
 
@@ -629,7 +633,7 @@ public class TestBackupAdminImpl {
     BackupSystemTable table = mock(BackupSystemTable.class);
     when(table.readBackupInfo("b1")).thenReturn(b1);
     when(table.readBackupInfo("b2")).thenReturn(b2);
-    when(table.getBackupHistory(any())).thenReturn(List.of(b1, b2));
+    when(table.getBackupHistory(any())).thenReturn(ImmutableList.of(b1, b2));
 
     new BackupAdminImpl(mock(Connection.class)).checkIfValidForMerge(ids, table);
   }
@@ -727,7 +731,7 @@ public class TestBackupAdminImpl {
     when(table.readBackupInfo("b2")).thenReturn(b2);
     when(table.readBackupInfo("b3")).thenReturn(b3);
 
-    when(table.getBackupHistory(any())).thenReturn(List.of(b1, b2, b3));
+    when(table.getBackupHistory(any())).thenReturn(ImmutableList.of(b1, b2, b3));
 
     // Simulate a "hole" by omitting b2 from images
     String[] idsWithHole = { "b1", "b3" };
@@ -743,7 +747,7 @@ public class TestBackupAdminImpl {
     info.setState(state);
     info.setStartTs(ts);
     info.setBackupRootDir(dest);
-    info.setTables(List.of(tables));
+    info.setTables(ImmutableList.copyOf(tables));
     return info;
   }
 }

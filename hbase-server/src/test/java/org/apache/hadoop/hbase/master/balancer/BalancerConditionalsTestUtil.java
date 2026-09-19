@@ -145,9 +145,9 @@ public final class BalancerConditionalsTestUtil {
   static void validateRegionLocations(Map<TableName, Set<ServerName>> tableToServers,
     TableName productTableName, boolean shouldBeBalanced) {
     ServerName metaServer =
-      tableToServers.get(TableName.META_TABLE_NAME).stream().findFirst().orElseThrow();
+      tableToServers.get(TableName.META_TABLE_NAME).stream().findFirst().get();
     ServerName quotaServer =
-      tableToServers.get(QuotaUtil.QUOTA_TABLE_NAME).stream().findFirst().orElseThrow();
+      tableToServers.get(QuotaUtil.QUOTA_TABLE_NAME).stream().findFirst().get();
     Set<ServerName> productServers = tableToServers.get(productTableName);
 
     if (shouldBeBalanced) {

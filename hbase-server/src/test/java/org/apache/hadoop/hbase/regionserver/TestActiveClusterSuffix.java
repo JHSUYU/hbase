@@ -36,6 +36,7 @@ import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.JVMClusterUtil;
+import org.apache.hbase.thirdparty.com.google.common.io.ByteStreams;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -82,7 +83,8 @@ public class TestActiveClusterSuffix {
     MasterFileSystem mfs = TEST_UTIL.getHBaseCluster().getMaster().getMasterFileSystem();
 
     try (FSDataInputStream in = fs.open(filePath)) {
-      ActiveClusterSuffix suffixFromFile = ActiveClusterSuffix.parseFrom(in.readAllBytes());
+      ActiveClusterSuffix suffixFromFile =
+        ActiveClusterSuffix.parseFrom(ByteStreams.toByteArray(in));
       ActiveClusterSuffix suffixFromConfig =
         ActiveClusterSuffix.fromConfig(TEST_UTIL.getConfiguration(), mfs.getClusterId());
       assertEquals(suffixFromFile, suffixFromConfig,

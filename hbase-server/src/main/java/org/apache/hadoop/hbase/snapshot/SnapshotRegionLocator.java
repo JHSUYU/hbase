@@ -19,9 +19,11 @@ package org.apache.hadoop.hbase.snapshot;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import org.apache.commons.lang3.NotImplementedException;
 import org.apache.hadoop.conf.Configuration;
@@ -108,7 +110,7 @@ public final class SnapshotRegionLocator implements RegionLocator {
 
   @Override
   public List<HRegionLocation> getRegionLocations(byte[] row, boolean reload) throws IOException {
-    return List.of(getRegionLocation(row, reload));
+    return Collections.singletonList(Objects.requireNonNull(getRegionLocation(row, reload)));
   }
 
   @Override

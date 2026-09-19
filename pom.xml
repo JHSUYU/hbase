@@ -861,8 +861,10 @@
     <tar.name>${project.build.finalName}.tar.gz</tar.name>
     <maven.build.timestamp.format>yyyy-MM-dd'T'HH:mm</maven.build.timestamp.format>
     <buildDate>${maven.build.timestamp}</buildDate>
-    <compileSource>17</compileSource>
-    <releaseTarget>17</releaseTarget>
+    <compileSource>1.8</compileSource>
+    <releaseTarget>8</releaseTarget>
+    <maven.compiler.source>1.8</maven.compiler.source>
+    <maven.compiler.target>1.8</maven.compiler.target>
     <!-- Build dependencies -->
     <!-- The $revision feature is introduced in 3.5.0 -->
     <maven.min.version>3.5.0</maven.min.version>
@@ -885,8 +887,8 @@
     -->
     <netty4.version>4.1.131.Final</netty4.version>
     <!-- end HBASE-15925 default hadoop compatibility values -->
-    <audience-annotations.version>0.15.0</audience-annotations.version>
-    <javadoc.audience-annotations.version>0.15.0</javadoc.audience-annotations.version>
+    <audience-annotations.version>0.13.0</audience-annotations.version>
+    <javadoc.audience-annotations.version>0.13.0</javadoc.audience-annotations.version>
     <avro.version>1.11.5</avro.version>
     <caffeine.version>2.8.1</caffeine.version>
     <commons-codec.version>1.15</commons-codec.version>

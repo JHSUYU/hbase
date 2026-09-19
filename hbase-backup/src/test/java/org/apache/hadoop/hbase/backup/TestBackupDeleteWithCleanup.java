@@ -50,6 +50,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableSet;
 import org.apache.hbase.thirdparty.com.google.common.collect.Lists;
 
 @Tag(LargeTests.TAG)
@@ -93,7 +94,7 @@ public class TestBackupDeleteWithCleanup extends TestBackupBase {
     logDirectoryStructure(fs, backupWalDir, "Directory structure BEFORE cleanup:");
 
     // Step 2: Simulate Backup Creation
-    backupSystemTable.addContinuousBackupTableSet(Set.of(table1),
+    backupSystemTable.addContinuousBackupTableSet(ImmutableSet.of(table1),
       currentTime - (2 * ONE_DAY_IN_MILLISECONDS));
 
     EnvironmentEdgeManager
@@ -130,7 +131,7 @@ public class TestBackupDeleteWithCleanup extends TestBackupBase {
     logDirectoryStructure(fs, backupWalDir, "Directory structure BEFORE cleanup:");
 
     // Step 2: Simulate Backup Creation
-    backupSystemTable.addContinuousBackupTableSet(Set.of(table1),
+    backupSystemTable.addContinuousBackupTableSet(ImmutableSet.of(table1),
       currentTime - (2 * ONE_DAY_IN_MILLISECONDS));
 
     EnvironmentEdgeManager

@@ -54,7 +54,7 @@ public class JerseyResource {
     final Map<String, Object> m = new TreeMap<>();
     m.put(PATH, path);
     m.put(OP, op);
-    final String js = new JSON().toJSON(m);
+    final String js = JSON.toString(m);
     return Response.ok(js).type(MediaType.APPLICATION_JSON).build();
   }
 }

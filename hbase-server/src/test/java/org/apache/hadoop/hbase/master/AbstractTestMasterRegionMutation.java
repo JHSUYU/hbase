@@ -70,7 +70,7 @@ public abstract class AbstractTestMasterRegionMutation {
 
   @BeforeEach
   protected void setUp(TestInfo testInfo) throws Exception {
-    TableName tableName = TableName.valueOf(testInfo.getTestMethod().orElseThrow().getName());
+    TableName tableName = TableName.valueOf(testInfo.getTestMethod().get().getName());
     TableDescriptor tableDesc = TableDescriptorBuilder.newBuilder(tableName)
       .setColumnFamily(ColumnFamilyDescriptorBuilder.of("fam1")).build();
     int startKey = 0;

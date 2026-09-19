@@ -99,15 +99,22 @@ public class RefreshMetaProcedure extends AbstractStateMachineTableProcedure<Ref
     LOG.info("Executing RefreshMetaProcedure state: {}", refreshMetaState);
 
     try {
-      return switch (refreshMetaState) {
-        case REFRESH_META_INIT -> executeInit(env);
-        case REFRESH_META_SCAN_STORAGE -> executeScanStorage(env);
-        case REFRESH_META_PREPARE -> executePrepare();
-        case REFRESH_META_APPLY -> executeApply(env);
-        case REFRESH_META_FOLLOWUP -> executeFollowup(env);
-        case REFRESH_META_FINISH -> executeFinish(env);
-        default -> throw new UnsupportedOperationException("Unhandled state: " + refreshMetaState);
-      };
+      switch (refreshMetaState) {
+        case REFRESH_META_INIT:
+          return executeInit(env);
+        case REFRESH_META_SCAN_STORAGE:
+          return executeScanStorage(env);
+        case REFRESH_META_PREPARE:
+          return executePrepare();
+        case REFRESH_META_APPLY:
+          return executeApply(env);
+        case REFRESH_META_FOLLOWUP:
+          return executeFollowup(env);
+        case REFRESH_META_FINISH:
+          return executeFinish(env);
+        default:
+          throw new UnsupportedOperationException("Unhandled state: " + refreshMetaState);
+      }
     } catch (Exception ex) {
       LOG.error("Error in RefreshMetaProcedure state {}", refreshMetaState, ex);
       setFailure("RefreshMetaProcedure", ex);
@@ -341,7 +348,8 @@ public class RefreshMetaProcedure extends AbstractStateMachineTableProcedure<Ref
 
     FileStatus[] namespaceDirs =
       fs.listStatus(dataDir, path -> !path.getName().matches(HIDDEN_DIR_PATTERN));
-    LOG.debug("Found {} namespace directories in data dir", Arrays.stream(namespaceDirs).toList());
+    LOG.debug("Found {} namespace directories in data dir",
+      Arrays.stream(namespaceDirs).collect(Collectors.toList()));
 
     for (FileStatus nsDir : namespaceDirs) {
       String namespaceName = nsDir.getPath().getName();
@@ -378,7 +386,7 @@ public class RefreshMetaProcedure extends AbstractStateMachineTableProcedure<Ref
           namespacePath.getName(), e);
         return Stream.empty();
       }
-    }).toList();
+    }).collect(Collectors.toList());
   }
 
   private List<RegionInfo> scanRegionsInTable(FileSystem fs, List<Path> regionDirs)

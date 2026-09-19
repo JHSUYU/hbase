@@ -38,6 +38,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.BiConsumer;
+import java.util.stream.Collectors;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -899,7 +900,8 @@ public class ExportSnapshot extends AbstractHBaseTool implements Tool {
 
       // Within each group, create splits of equal size. Groups are not mixed together.
       return groups.stream().map(g -> getBalancedSplits(g, mappersPerGroup))
-        .flatMap(Collection::stream).toList();
+        .flatMap(Collection::stream).collect(
+          Collectors.collectingAndThen(Collectors.toList(), Collections::unmodifiableList));
     }
 
     static class ExportSnapshotInputSplit extends InputSplit implements Writable {

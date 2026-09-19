@@ -75,7 +75,7 @@ public class TestSnapshotStats {
 
     Optional<SnapshotDescription> optional =
       admin.listSnapshots().stream().filter(s -> snapshotName.equals(s.getName())).findFirst();
-    SnapshotDescription snapshotDescription = optional.orElseThrow();
+    SnapshotDescription snapshotDescription = optional.get();
 
     SnapshotInfo.SnapshotStats snapshotStats =
       SnapshotInfo.getSnapshotStats(TEST_UTIL.getConfiguration(), snapshotDescription);
@@ -103,7 +103,7 @@ public class TestSnapshotStats {
 
     Optional<SnapshotDescription> optional =
       admin.listSnapshots().stream().filter(s -> snapshotName.equals(s.getName())).findFirst();
-    SnapshotDescription snapshotDescription = optional.orElseThrow();
+    SnapshotDescription snapshotDescription = optional.get();
 
     SnapshotInfo.SnapshotStats snapshotStats =
       SnapshotInfo.getSnapshotStats(TEST_UTIL.getConfiguration(), snapshotDescription);

@@ -29,6 +29,7 @@ import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.apache.hbase.thirdparty.com.google.common.io.ByteStreams;
 
 /**
  * Verifies {@link ProfilerBackend#detect} fallback behaviour when
@@ -134,7 +135,7 @@ public class TestProfilerBackendIsolated {
           String path = name.replace('.', '/') + ".class";
           try (java.io.InputStream in = parent.getResourceAsStream(path)) {
             if (in != null) {
-              byte[] bytes = in.readAllBytes();
+              byte[] bytes = ByteStreams.toByteArray(in);
               c = defineClass(name, bytes, 0, bytes.length);
               if (resolve) {
                 resolveClass(c);

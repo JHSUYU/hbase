@@ -167,7 +167,8 @@ public class FullTableBackupClient extends TableBackupClient {
       }
 
       backupManager
-        .deleteBulkLoadedRows(bulkLoadsToDelete.stream().map(BulkLoad::getRowKey).toList());
+        .deleteBulkLoadedRows(
+          bulkLoadsToDelete.stream().map(BulkLoad::getRowKey).collect(Collectors.toList()));
 
       completeBackup(conn, backupInfo, BackupType.FULL, conf);
     } catch (Exception e) {

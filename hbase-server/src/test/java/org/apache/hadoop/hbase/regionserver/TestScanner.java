@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.NavigableSet;
 import org.apache.hadoop.hbase.Cell;
@@ -208,7 +209,7 @@ public class TestScanner {
     StoreScanner.enableLazySeekGlobally(true);
     try {
       this.region = TEST_UTIL.createLocalHRegion(tableDescriptor, null, null);
-      List<String> rows = List.of("row1", "row2", "row3");
+      List<String> rows = Arrays.asList("row1", "row2", "row3");
       for (String row : rows) {
         Put put = new Put(Bytes.toBytes(row)).addColumn(family, qualifier, Bytes.toBytes("value"));
         region.put(put);

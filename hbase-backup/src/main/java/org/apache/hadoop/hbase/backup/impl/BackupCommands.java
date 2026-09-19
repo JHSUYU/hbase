@@ -773,7 +773,7 @@ public final class BackupCommands {
 
         // Only full backups are mandatory for PITR
         if (!BackupType.FULL.equals(targetBackup.getType())) {
-          return List.of();
+          return Collections.emptyList();
         }
 
         // Retrieve the tables with continuous backup enabled along with their start times
@@ -798,7 +798,7 @@ public final class BackupCommands {
             continuousBackupStartTimes.get(table), maxAllowedPITRTime, currentTime);
 
           // If this backup does not cover a valid PITR window for the table, skip
-          if (coveredPitrWindow.isEmpty()) {
+          if (!coveredPitrWindow.isPresent()) {
             continue;
           }
 

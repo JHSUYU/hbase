@@ -23,7 +23,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HConstants;
@@ -189,13 +188,13 @@ public final class CoprocessorConfigurationUtil {
   private static void syncCoprocessorsWithConf(Configuration srcConf, Configuration dstConf,
     String coprocessorConfKey) {
     String configuredCps = srcConf.get(coprocessorConfKey);
-    dstConf.set(coprocessorConfKey, Objects.requireNonNullElse(configuredCps, ""));
+    dstConf.set(coprocessorConfKey, configuredCps != null ? configuredCps : "");
 
     // A configuration with region coprocessors may also have user region coprocessors
     if (CoprocessorHost.REGION_COPROCESSOR_CONF_KEY.equals(coprocessorConfKey)) {
       String configuredUserCps = srcConf.get(CoprocessorHost.USER_REGION_COPROCESSOR_CONF_KEY);
       dstConf.set(CoprocessorHost.USER_REGION_COPROCESSOR_CONF_KEY,
-        Objects.requireNonNullElse(configuredUserCps, ""));
+        configuredUserCps != null ? configuredUserCps : "");
     }
   }
 
@@ -240,13 +239,17 @@ public final class CoprocessorConfigurationUtil {
    * @return the component type - Master, Region Server, or Region
    */
   public static String getComponentName(String coprocessorConfKey) {
-    return switch (coprocessorConfKey) {
-      case CoprocessorHost.MASTER_COPROCESSOR_CONF_KEY -> "Master";
-      case CoprocessorHost.REGIONSERVER_COPROCESSOR_CONF_KEY -> "Region Server";
-      case CoprocessorHost.REGION_COPROCESSOR_CONF_KEY -> "Region";
-      default -> throw new IllegalArgumentException(
-        "Unsupported coprocessor configuration key: " + coprocessorConfKey);
-    };
+    switch (coprocessorConfKey) {
+      case CoprocessorHost.MASTER_COPROCESSOR_CONF_KEY:
+        return "Master";
+      case CoprocessorHost.REGIONSERVER_COPROCESSOR_CONF_KEY:
+        return "Region Server";
+      case CoprocessorHost.REGION_COPROCESSOR_CONF_KEY:
+        return "Region";
+      default:
+        throw new IllegalArgumentException(
+          "Unsupported coprocessor configuration key: " + coprocessorConfKey);
+    }
   }
 
   /**
