@@ -404,6 +404,9 @@ public class SingleProcessHBaseCluster extends HBaseClusterInterface {
     try {
       t =
         hbaseCluster.addRegionServer(configuration, hbaseCluster.getRegionServers().size(), rsUser);
+      if (CausynthHBaseCluster.automatic() && CausynthHBaseCluster.windowOpen()) {
+        CausynthHBaseCluster.registerRegionServer(t.getRegionServer());
+      }
       t.start();
       t.waitForServerOnline();
     } catch (InterruptedException ie) {
@@ -517,6 +520,9 @@ public class SingleProcessHBaseCluster extends HBaseClusterInterface {
     JVMClusterUtil.MasterThread t = null;
     try {
       t = hbaseCluster.addMaster(c, hbaseCluster.getMasters().size(), user);
+      if (CausynthHBaseCluster.automatic() && CausynthHBaseCluster.windowOpen()) {
+        CausynthHBaseCluster.registerMaster(t.getMaster());
+      }
       t.start();
     } catch (InterruptedException ie) {
       throw new IOException("Interrupted adding master to cluster", ie);

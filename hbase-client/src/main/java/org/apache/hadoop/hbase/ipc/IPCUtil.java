@@ -142,6 +142,7 @@ class IPCUtil {
       }
     }
     builder.setTimeout(call.timeout);
+    CausynthRpc.header(builder, call);
 
     return builder.build();
   }

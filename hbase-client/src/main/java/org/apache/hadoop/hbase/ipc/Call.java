@@ -62,6 +62,12 @@ class Call {
   private final RpcCallback<Call> callback;
   final Span span;
   Timeout timeoutTask;
+  /** GraphChecker's context of the call and of its response ({@link CausynthRpc}). */
+  String causynthCorrelation = "";
+  String causynthTrace = "";
+  String causynthSymbolic = "";
+  String causynthResponseTrace = "";
+  String causynthResponseSymbolic = "";
 
   Call(int id, final Descriptors.MethodDescriptor md, Message param,
     final ExtendedCellScanner cells, final Message responseDefaultType, int timeout, int priority,

@@ -38,6 +38,14 @@
     <hbase.webapps.dir>hbase-webapps</hbase.webapps.dir>
   </properties>
   <dependencies>
+    <!-- GraphChecker's runtime API (MessageDoors) and target marker: provided,
+         the launcher supplies its jar to every workload JVM. -->
+    <dependency>
+      <groupId>org.example</groupId>
+      <artifactId>GraphChecker</artifactId>
+      <version>1.0-SNAPSHOT</version>
+      <scope>provided</scope>
+    </dependency>
     <dependency>
       <groupId>org.apache.hbase.thirdparty</groupId>
       <artifactId>hbase-shaded-protobuf</artifactId>

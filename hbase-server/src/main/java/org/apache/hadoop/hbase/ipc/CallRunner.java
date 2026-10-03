@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hbase.ipc;
 
+import edu.uva.liftlab.graphchecker.runtime.MessageDoors;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.context.Scope;
@@ -88,6 +89,7 @@ public class CallRunner {
   }
 
   public void run() {
+    MessageDoors.Inbound causynth = null;
     try (Scope ignored = span.makeCurrent()) {
       if (call.disconnectSince() >= 0) {
         RpcServer.LOG.debug("{}: skipped {}", Thread.currentThread().getName(), call);
@@ -113,6 +115,7 @@ public class CallRunner {
       String error = null;
       Pair<Message, ExtendedCellScanner> resultPair = null;
       RpcServer.CurCall.set(call);
+      causynth = CausynthRpc.serve(call.getHeader(), this.rpcServer);
       final Span ipcServerSpan = new IpcServerSpanBuilder(call).build();
       try (Scope ignored1 = ipcServerSpan.makeCurrent()) {
         if (!this.rpcServer.isStarted()) {
@@ -184,6 +187,7 @@ public class CallRunner {
         StringUtils.stringifyException(e));
       TraceUtil.setError(span, e);
     } finally {
+      CausynthRpc.served(causynth);
       if (!successful) {
         this.rpcServer.addCallSize(call.getSize() * -1);
       }

@@ -867,6 +867,9 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
       throw new IllegalStateException("A mini-cluster is already running");
     }
     miniClusterRunning = true;
+    if (CausynthHBaseCluster.automatic()) {
+      CausynthHBaseCluster.configure(conf);
+    }
 
     setupClusterTestDir();
 
@@ -933,6 +936,9 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
 
     getAdmin(); // create immediately the hbaseAdmin
     LOG.info("Minicluster is up; activeMaster={}", getHBaseCluster().getMaster());
+    if (CausynthHBaseCluster.automatic()) {
+      CausynthHBaseCluster.registerAutomatically(this);
+    }
 
     return (SingleProcessHBaseCluster) hbaseCluster;
   }
@@ -1089,6 +1095,9 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
    * @throws java.io.IOException in case command is unsuccessful
    */
   public void shutdownMiniHBaseCluster() throws IOException {
+    if (CausynthHBaseCluster.automatic()) {
+      CausynthHBaseCluster.shutdownAutomatically();
+    }
     cleanup();
     if (this.hbaseCluster != null) {
       this.hbaseCluster.shutdown();

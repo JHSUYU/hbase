@@ -299,6 +299,8 @@ public abstract class ServerCall<T extends ServerRpcConnection> implements RpcCa
       if (t != null) {
         setExceptionResponse(t, errorMsg, headerBuilder);
       }
+      CausynthRpc.respond(headerBuilder, this.header,
+        this.connection == null ? null : this.connection.rpcServer);
       // Pass reservoir to buildCellBlock. Keep reference to returne so can add it back to the
       // reservoir when finished. This is hacky and the hack is not contained but benefits are
       // high when we can avoid a big buffer allocation on each rpc.

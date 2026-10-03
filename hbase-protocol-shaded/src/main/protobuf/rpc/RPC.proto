@@ -150,6 +150,11 @@ message RequestHeader {
   optional uint32 priority = 6;
   optional uint32 timeout = 7;
   repeated NameBytesPair attribute = 8;
+  // GraphChecker's causal context (MessageDoors): the sender's trace header,
+  // its symbolic header, and the exchange's correlation id.
+  optional string causynth_trace = 9;
+  optional string causynth_symbolic = 10;
+  optional string causynth_correlation = 11;
 }
 
 message ResponseHeader {
@@ -158,6 +163,9 @@ message ResponseHeader {
   optional ExceptionResponse exception = 2;
   // If present, then an encoded data block follows.
   optional CellBlockMeta cell_block_meta = 3;
+  // GraphChecker's causal context of the response (MessageDoors).
+  optional string causynth_trace = 4;
+  optional string causynth_symbolic = 5;
 }
 
 message SecurityPreamableResponse {

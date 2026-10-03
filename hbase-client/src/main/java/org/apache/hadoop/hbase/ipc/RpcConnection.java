@@ -478,6 +478,7 @@ abstract class RpcConnection {
       return;
     }
     call.callStats.setResponseSizeBytes(totalSize);
+    CausynthRpc.responded(call, responseHeader);
     if (remoteExc != null) {
       call.setException(remoteExc);
       return;

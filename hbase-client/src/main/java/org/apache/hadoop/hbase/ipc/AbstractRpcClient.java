@@ -139,6 +139,9 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
 
   private final AtomicInteger callIdCnt = new AtomicInteger(0);
 
+  /** This client's number in the JVM, its calls' correlation ids' prefix ({@link CausynthRpc}). */
+  private final long causynthClient = CausynthRpc.nextClient();
+
   private final ScheduledFuture<?> cleanupIdleConnectionTask;
 
   private int maxConcurrentCallsPerServer;
@@ -338,12 +341,14 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
     Message param, Message returnType, final User ticket, final Address isa)
     throws ServiceException {
     BlockingRpcCallback<Message> done = new BlockingRpcCallback<>();
-    callMethod(md, hrc, param, returnType, ticket, isa, done);
+    Call call = callMethod(md, hrc, param, returnType, ticket, isa, done);
     Message val;
     try {
       val = done.get();
     } catch (IOException e) {
       throw new ServiceException(e);
+    } finally {
+      CausynthRpc.returned(call, this);
     }
     if (hrc.failed()) {
       throw new ServiceException(hrc.getFailed());
@@ -443,6 +448,7 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
               }
             }
           }, cs);
+      CausynthRpc.leave(call, causynthClient, this);
       ConnectionId remoteId = new ConnectionId(ticket, md.getService().getName(), addr);
       int count = counter.incrementAndGet();
       try {
