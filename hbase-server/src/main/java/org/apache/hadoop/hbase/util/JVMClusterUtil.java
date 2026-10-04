@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hbase.util;
 
+import edu.uva.liftlab.graphchecker.runtime.MessageDoors;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.lang.reflect.Constructor;
@@ -94,6 +95,19 @@ public class JVMClusterUtil {
   }
 
   /**
+   * Starts a node's thread: GraphChecker attributes what the thread runs, and what it starts, to
+   * {@code node}, a registered node, whoever starts it.
+   */
+  public static void start(Thread thread, Object node) {
+    long startup = MessageDoors.beginNodeStartup(node);
+    try {
+      thread.start();
+    } finally {
+      MessageDoors.endNodeStartup(startup);
+    }
+  }
+
+  /**
    * Datastructure to hold Master Thread and Master instance
    */
   public static class MasterThread extends Thread {
@@ -165,7 +179,7 @@ public class JVMClusterUtil {
 
     for (JVMClusterUtil.MasterThread t : masters) {
       configuration = t.getMaster().getConfiguration();
-      t.start();
+      start(t, t.getMaster());
     }
 
     // Wait for an active master
@@ -178,7 +192,7 @@ public class JVMClusterUtil {
 
     if (regionservers != null) {
       for (JVMClusterUtil.RegionServerThread t : regionservers) {
-        t.start();
+        start(t, t.getRegionServer());
       }
     }
 

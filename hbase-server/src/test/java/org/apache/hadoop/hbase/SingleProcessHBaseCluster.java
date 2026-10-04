@@ -189,8 +189,11 @@ public class SingleProcessHBaseCluster extends HBaseClusterInterface {
       }
 
       // start up a LocalHBaseCluster
-      hbaseCluster = new LocalHBaseCluster(conf, nMasterNodes, numAlwaysStandByMasters, 0,
-        masterClass, regionserverClass);
+      hbaseCluster = CausynthHBaseCluster.automatic()
+        ? CausynthHBaseCluster.localCluster(conf, nMasterNodes, numAlwaysStandByMasters,
+          masterClass, regionserverClass)
+        : new LocalHBaseCluster(conf, nMasterNodes, numAlwaysStandByMasters, 0, masterClass,
+          regionserverClass);
 
       // manually add the regionservers as other users
       for (int i = 0; i < nRegionNodes; i++) {
@@ -404,10 +407,7 @@ public class SingleProcessHBaseCluster extends HBaseClusterInterface {
     try {
       t =
         hbaseCluster.addRegionServer(configuration, hbaseCluster.getRegionServers().size(), rsUser);
-      if (CausynthHBaseCluster.automatic() && CausynthHBaseCluster.windowOpen()) {
-        CausynthHBaseCluster.registerRegionServer(t.getRegionServer());
-      }
-      t.start();
+      JVMClusterUtil.start(t, t.getRegionServer());
       t.waitForServerOnline();
     } catch (InterruptedException ie) {
       throw new IOException("Interrupted adding regionserver to cluster", ie);
@@ -520,10 +520,7 @@ public class SingleProcessHBaseCluster extends HBaseClusterInterface {
     JVMClusterUtil.MasterThread t = null;
     try {
       t = hbaseCluster.addMaster(c, hbaseCluster.getMasters().size(), user);
-      if (CausynthHBaseCluster.automatic() && CausynthHBaseCluster.windowOpen()) {
-        CausynthHBaseCluster.registerMaster(t.getMaster());
-      }
-      t.start();
+      JVMClusterUtil.start(t, t.getMaster());
     } catch (InterruptedException ie) {
       throw new IOException("Interrupted adding master to cluster", ie);
     }

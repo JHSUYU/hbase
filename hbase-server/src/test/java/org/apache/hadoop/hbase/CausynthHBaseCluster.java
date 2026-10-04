@@ -46,9 +46,17 @@ import org.apache.hadoop.hdfs.server.namenode.NameNodeRpcServer;
  * HMaster and HRegionServer with the objects it runs its work through, the mini cluster's NameNode
  * and DataNodes, and its ZooKeeper servers, named {@code auto0/<role><i>} in the order they
  * registered; a master or region server the test starts later is registered as it is added, before
- * it starts. The window opens once the cluster is up, with one request of the test on the thread
- * that started it and on the test's client connection, and closes when the test shuts the cluster
- * down: the teardown is not recorded.
+ * it starts. The window opens once the cluster is up, with one request of the test (client
+ * {@code auto0/client0}, the testing utility and its client connection) on the thread that started
+ * it, and closes when the test shuts the cluster down: the teardown is not recorded.
+ * <p>
+ * A case that declares its window at startup ({@link MessageDoors#startupWindow}: a bug whose fatal
+ * value is set while the cluster starts, a master's activation time) has it open before the HBase
+ * cluster starts, its HDFS and ZooKeeper up: those are registered then, its client connection once
+ * there is one, and each master and region server is constructed in a node startup under the name
+ * it is then registered by ({@link #localCluster}; {@code JVMClusterUtil#start} brackets its
+ * thread's start too), so what they start or create belongs to the node from the first, not to the
+ * test's request they run under.
  * <p>
  * Nothing the cluster sets up expires on the wall clock ({@link #configure}): the recording runs on
  * a JIT and every replay on an interpreter many times slower, so an RPC, a session, an idle
@@ -57,6 +65,8 @@ import org.apache.hadoop.hdfs.server.namenode.NameNodeRpcServer;
 public final class CausynthHBaseCluster {
   public static final String AUTOMATIC = "causynth.cluster.automatic";
   private static final String NODE = "CLUSTER_NODE";
+  private static final String MASTER = "HMASTER";
+  private static final String REGION_SERVER = "REGIONSERVER";
   private static final String PREFIX = "auto0/";
   /** Longer than any case runs: an expiry that cannot fire. */
   private static final int NEVER_MS = (int) TimeUnit.HOURS.toMillis(6);
@@ -66,6 +76,7 @@ public final class CausynthHBaseCluster {
   /** The nodes registered so far, by identity, and how many of each role. */
   private static final Map<Object, String> REGISTERED = new IdentityHashMap<>();
   private static final Map<String, Integer> COUNTS = new HashMap<>();
+  /** The test's client while the window is open, else null. */
   private static Object windowClient;
   private static long windowRequest;
 
@@ -94,17 +105,51 @@ public final class CausynthHBaseCluster {
       // the mini cluster's HDFS, which the WALs and store files are written to
       "ipc.client.connection.maxidletime", "ipc.client.rpc-timeout.ms",
       "dfs.client.socket-timeout", "dfs.datanode.socket.write.timeout",
-      "dfs.client.socketcache.expiryMsec" }) {
+      "dfs.client.socketcache.expiryMsec",
+      // the local cluster's waits for an active, then an initialized master
+      "hbase.master.start.timeout.localHBaseCluster",
+      "hbase.master.init.timeout.localHBaseCluster" }) {
       conf.setInt(key, NEVER_MS);
     }
     conf.setFloat(Waiter.HBASE_TEST_WAIT_FOR_RATIO, WAIT_RATIO);
   }
 
   /**
-   * The cluster is up: every node registered, and the window opened on the test's thread and
-   * client connection.
+   * The HBase cluster is about to start, its HDFS and ZooKeeper up: for a case that declares its
+   * window at startup, they are registered and the window opened on the test's thread.
+   */
+  public static synchronized void openStartupWindow(HBaseTestingUtil util) {
+    if (!MessageDoors.startupWindow() || windowClient != null) {
+      return;
+    }
+    registerStores(util);
+    openWindow(util);
+  }
+
+  /**
+   * The cluster is up: every node registered, with the components it has made since it was
+   * constructed, and the window opened on the test's thread unless the case opened it at startup;
+   * the test's client connection is the test's client.
    */
   public static synchronized void registerAutomatically(HBaseTestingUtil util) throws IOException {
+    registerStores(util);
+    SingleProcessHBaseCluster cluster = util.getMiniHBaseCluster();
+    for (JVMClusterUtil.MasterThread master : cluster.getMasterThreads()) {
+      registerMaster(master.getMaster());
+    }
+    for (JVMClusterUtil.RegionServerThread server : cluster.getRegionServerThreads()) {
+      registerRegionServer(server.getRegionServer());
+    }
+    AsyncClusterConnection connection = util.getAsyncConnection();
+    if (windowClient == null) {
+      openWindow(util);
+    }
+    MessageDoors.registerNode(util, "EXTERNAL_APP", "HBASE_CLIENT", PREFIX + "client0",
+      connection, connection.getRpcClient());
+  }
+
+  /** The mini cluster's HDFS and ZooKeeper, whichever it has. */
+  private static void registerStores(HBaseTestingUtil util) {
     MiniDFSCluster dfs = util.getDFSCluster();
     if (dfs != null) {
       registerHdfs(dfs);
@@ -113,21 +158,62 @@ public final class CausynthHBaseCluster {
     if (zk != null) {
       registerZooKeeper(zk);
     }
-    SingleProcessHBaseCluster cluster = util.getMiniHBaseCluster();
-    for (JVMClusterUtil.MasterThread master : cluster.getMasterThreads()) {
-      registerMaster(master.getMaster());
-    }
-    for (JVMClusterUtil.RegionServerThread server : cluster.getRegionServerThreads()) {
-      registerRegionServer(server.getRegionServer());
-    }
-    if (windowClient == null) {
-      AsyncClusterConnection client = util.getAsyncConnection();
-      MessageDoors.registerNode(client, "EXTERNAL_APP", "HBASE_CLIENT", PREFIX + "client0",
-        client.getRpcClient());
-      windowClient = client;
-      MessageDoors.startRecording();
-      windowRequest = MessageDoors.beginRequest(client, "test");
-    }
+  }
+
+  /** The window opens with the test's request, on the thread that started the cluster. */
+  private static void openWindow(HBaseTestingUtil util) {
+    MessageDoors.registerNode(util, "EXTERNAL_APP", "HBASE_CLIENT", PREFIX + "client0");
+    windowClient = util;
+    MessageDoors.startRecording();
+    windowRequest = MessageDoors.beginRequest(util, "test");
+  }
+
+  /**
+   * The local cluster a mini cluster builds its masters and region servers in: while the window is
+   * open, each is constructed in a node startup under the name it is then registered by, so what
+   * its construction starts or creates is the node's from the first (named only once registered,
+   * its ZooKeeper callbacks raced the registration and a replay ordered them otherwise).
+   */
+  public static LocalHBaseCluster localCluster(Configuration conf, int masters, int standByMasters,
+    Class<? extends HMaster> masterClass, Class<? extends HRegionServer> regionServerClass)
+    throws IOException {
+    return new LocalHBaseCluster(conf, masters, standByMasters, 0, masterClass,
+      regionServerClass) {
+      @Override
+      public JVMClusterUtil.MasterThread addMaster(Configuration c, int index) throws IOException {
+        if (!windowOpen()) {
+          return super.addMaster(c, index);
+        }
+        String sourceId = reserve(MASTER, "master");
+        long startup = MessageDoors.beginNodeStartup(NODE, MASTER, sourceId);
+        try {
+          JVMClusterUtil.MasterThread thread = super.addMaster(c, index);
+          named(thread.getMaster(), sourceId);
+          registerMaster(thread.getMaster());
+          return thread;
+        } finally {
+          MessageDoors.endNodeStartup(startup);
+        }
+      }
+
+      @Override
+      public JVMClusterUtil.RegionServerThread addRegionServer(Configuration c, int index)
+        throws IOException {
+        if (!windowOpen()) {
+          return super.addRegionServer(c, index);
+        }
+        String sourceId = reserve(REGION_SERVER, "rs");
+        long startup = MessageDoors.beginNodeStartup(NODE, REGION_SERVER, sourceId);
+        try {
+          JVMClusterUtil.RegionServerThread thread = super.addRegionServer(c, index);
+          named(thread.getRegionServer(), sourceId);
+          registerRegionServer(thread.getRegionServer());
+          return thread;
+        } finally {
+          MessageDoors.endNodeStartup(startup);
+        }
+      }
+    };
   }
 
   /** The test shuts its cluster down: its request ends, and so does the window. */
@@ -144,12 +230,9 @@ public final class CausynthHBaseCluster {
    * and the remote dispatcher its procedures reach region servers through, the managers it
    * assigns and splits through, its ZooKeeper watcher and its connection to the cluster. A master
    * not yet active has none of the active ones' components: its threads are still found through
-   * the master itself.
+   * the master itself. Registered again, it keeps its name and adds what it has made since.
    */
   public static synchronized void registerMaster(HMaster master) {
-    if (REGISTERED.containsKey(master)) {
-      return;
-    }
     List<Object> aliases = serverAliases(master.getRpcServer(), master.getZooKeeper(),
       master.getAsyncClusterConnection(), master.getExecutorService());
     aliases.add(master.getMasterRpcServices());
@@ -163,23 +246,21 @@ public final class CausynthHBaseCluster {
     aliases.add(master.getServerManager());
     aliases.add(master.getSplitWALManager());
     aliases.add(master.getMasterWalManager());
-    register(master, "HMASTER", "master", aliases);
+    register(master, MASTER, "master", aliases);
   }
 
   /**
    * A region server as its own node: its RPC server and services, its executor (the handlers of
    * the procedures a master dispatches to it), its ZooKeeper watcher and its connection to the
-   * cluster -- the one its procedure reports go to the master on.
+   * cluster -- the one its procedure reports go to the master on. Registered again, it keeps its
+   * name and adds what it has made since.
    */
   public static synchronized void registerRegionServer(HRegionServer server) {
-    if (REGISTERED.containsKey(server)) {
-      return;
-    }
     List<Object> aliases = serverAliases(server.getRpcServer(), server.getZooKeeper(),
       server.getAsyncClusterConnection(), server.getExecutorService());
     aliases.add(server.getRSRpcServices());
     aliases.add(server.getWalFactory());
-    register(server, "REGIONSERVER", "rs", aliases);
+    register(server, REGION_SERVER, "rs", aliases);
   }
 
   /** Whether the window is open: a node the test adds now is registered as it is added. */
@@ -242,10 +323,23 @@ public final class CausynthHBaseCluster {
     register(zk, "ZOOKEEPER", "zk", aliases);
   }
 
-  private static void register(Object anchor, String role, String name, List<Object> aliases) {
-    int index = COUNTS.merge(name, 1, Integer::sum) - 1;
-    String sourceId = PREFIX + name + index;
-    REGISTERED.put(anchor, sourceId);
+  /** A node under the name it was first given, else the next of its role. */
+  private static synchronized void register(Object anchor, String role, String name,
+    List<Object> aliases) {
+    String sourceId = REGISTERED.get(anchor);
+    if (sourceId == null) {
+      sourceId = reserve(role, name);
+      named(anchor, sourceId);
+    }
     MessageDoors.registerNode(anchor, NODE, role, sourceId, aliases.toArray());
+  }
+
+  /** The next name of a role's nodes: {@code auto0/<name><i>}, in the order they are named. */
+  private static synchronized String reserve(String role, String name) {
+    return PREFIX + name + (COUNTS.merge(name, 1, Integer::sum) - 1);
+  }
+
+  private static synchronized void named(Object anchor, String sourceId) {
+    REGISTERED.put(anchor, sourceId);
   }
 }

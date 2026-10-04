@@ -918,6 +918,9 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
       conf.setInt(ServerManager.WAIT_ON_REGIONSERVERS_MAXTOSTART, option.getNumRegionServers());
     }
 
+    if (CausynthHBaseCluster.automatic()) {
+      CausynthHBaseCluster.openStartupWindow(this);
+    }
     Configuration c = new Configuration(this.conf);
     this.hbaseCluster = new SingleProcessHBaseCluster(c, option.getNumMasters(),
       option.getNumAlwaysStandByMasters(), option.getNumRegionServers(), option.getRsPorts(),
