@@ -26,16 +26,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ThreadPoolExecutor;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.hbase.HBaseTestingUtil;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Table;
+import org.apache.hadoop.hbase.executor.ExecutorType;
 import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.master.SplitWALManager;
 import org.apache.hadoop.hbase.procedure2.Procedure;
 import org.apache.hadoop.hbase.procedure2.ProcedureExecutor;
 import org.apache.hadoop.hbase.procedure2.ProcedureTestingUtility;
+import org.apache.hadoop.hbase.procedure2.RemoteProcedureDispatcher;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.testclassification.MasterTests;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
@@ -44,10 +47,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Tag(MasterTests.TAG)
 @Tag(MediumTests.TAG)
 public class TestSplitWALProcedure {
+  private static final Logger LOG = LoggerFactory.getLogger(TestSplitWALProcedure.class);
 
   private static HBaseTestingUtil TEST_UTIL;
   private HMaster master;
@@ -60,6 +66,8 @@ public class TestSplitWALProcedure {
     TEST_UTIL = new HBaseTestingUtil();
     TEST_UTIL.getConfiguration().setBoolean(HBASE_SPLIT_WAL_COORDINATED_BY_ZK, false);
     TEST_UTIL.getConfiguration().setInt(HBASE_SPLIT_WAL_MAX_SPLITTER, 1);
+    // A remote procedure leaves its master as soon as it is queued (testMasterRestart).
+    TEST_UTIL.getConfiguration().setInt(RemoteProcedureDispatcher.DISPATCH_DELAY_CONF_KEY, 0);
     TEST_UTIL.startMiniCluster(3);
     master = TEST_UTIL.getHBaseCluster().getMaster();
     splitWALManager = master.getSplitWALManager();
@@ -114,6 +122,13 @@ public class TestSplitWALProcedure {
     long pid = ProcedureTestingUtility.submitProcedure(master.getMasterProcedureExecutor(),
       splitWALProcedure, HConstants.NO_NONCE, HConstants.NO_NONCE);
     TEST_UTIL.waitFor(5000, () -> splitWALProcedure.getWorker() != null);
+    // The worker runs the split the old master dispatched before that master is killed, so its
+    // report reaches the restarted master with the old master's activation time.
+    ThreadPoolExecutor splitters = TEST_UTIL.getHBaseCluster()
+      .getRegionServer(splitWALProcedure.getWorker()).getExecutorService()
+      .getExecutorThreadPool(ExecutorType.RS_LOG_REPLAY_OPS);
+    TEST_UTIL.waitFor(5000, () -> splitters.getTaskCount() > 0);
+    long oldMasterActiveTime = master.getMasterActiveTime();
     // Kill master
     TEST_UTIL.getHBaseCluster().killMaster(master.getServerName());
     TEST_UTIL.getHBaseCluster().waitForMasterToStop(master.getServerName(), 20000);
@@ -121,6 +136,8 @@ public class TestSplitWALProcedure {
     TEST_UTIL.getHBaseCluster().startMaster();
     TEST_UTIL.getHBaseCluster().waitForActiveAndReadyMaster();
     this.master = TEST_UTIL.getHBaseCluster().getMaster();
+    LOG.info("Old master activeTime {}, new master activeTime {}", oldMasterActiveTime,
+      master.getMasterActiveTime());
     ProcedureTestingUtility.waitProcedure(master.getMasterProcedureExecutor(), pid);
     Optional<Procedure<?>> procedure =
       master.getProcedures().stream().filter(p -> p.getProcId() == pid).findAny();
