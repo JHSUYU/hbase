@@ -31,6 +31,7 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.RPCProtos.ResponseHeade
 public final class CausynthRpc {
   public static final String TRANSPORT = "HBASE_RPC";
   private static final String ATTEMPT = "1";
+  private static final String CORRELATION = "hbase-rpc-";
   private static final AtomicLong CLIENTS = new AtomicLong();
 
   private CausynthRpc() {
@@ -45,6 +46,13 @@ public final class CausynthRpc {
   }
 
   static long starting(Descriptors.MethodDescriptor md) {
+    MessageDoors.Inbound served = MessageDoors.current();
+    if (
+      served != null && MessageDoors.RESPONSE.equals(served.half)
+        && served.correlationId.startsWith(CORRELATION)
+    ) {
+      return 0L;
+    }
     return MessageDoors.requestStarting(TRANSPORT, verb(md), 1);
   }
 
@@ -53,7 +61,7 @@ public final class CausynthRpc {
   }
 
   static void sent(Call call, long client, Object owner) {
-    call.causynthCorrelation = "hbase-rpc-" + client + "-" + call.id;
+    call.causynthCorrelation = CORRELATION + client + "-" + call.id;
     call.causynthOwner = owner;
     MessageDoors.Outbound outbound = MessageDoors.outboundRequest(TRANSPORT,
       call.causynthCorrelation, ATTEMPT, owner, null, verb(call.md), call.param);
