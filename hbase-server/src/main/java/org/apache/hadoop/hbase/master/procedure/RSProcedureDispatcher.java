@@ -518,8 +518,12 @@ public class RSProcedureDispatcher extends RemoteProcedureDispatcher<MasterProce
     final ServerName serverName, final List<RegionOpenOperation> operations) {
     final OpenRegionRequest.Builder builder = OpenRegionRequest.newBuilder();
     builder.setServerStartCode(serverName.getStartCode());
-    operations.stream().map(RemoteOperation::getInitiatingMasterActiveTime).findAny()
-      .ifPresent(builder::setInitiatingMasterActiveTime);
+    // GraphChecker workaround (hbase-bugs-master-active-time): the first operation's time, set
+    // by a direct call (upstream: through a stream and a method reference, which the export
+    // analysis does not follow).
+    if (!operations.isEmpty()) {
+      builder.setInitiatingMasterActiveTime(operations.get(0).getInitiatingMasterActiveTime());
+    }
     builder.setMasterSystemTime(EnvironmentEdgeManager.currentTime());
     for (RegionOpenOperation op : operations) {
       builder.addOpenInfo(op.buildRegionOpenInfoRequest(env));
