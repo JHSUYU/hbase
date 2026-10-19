@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -93,7 +94,6 @@ import org.apache.zookeeper.KeeperException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableMap;
 import org.apache.hbase.thirdparty.com.google.common.collect.Lists;
 import org.apache.hbase.thirdparty.com.google.common.collect.Maps;
 import org.apache.hbase.thirdparty.com.google.common.collect.Sets;
@@ -170,25 +170,28 @@ final class RSGroupInfoManagerImpl implements RSGroupInfoManager {
   // There two Maps are immutable and wholesale replaced on each modification
   // so are safe to access concurrently. See class comment.
   private static final class RSGroupInfoHolder {
-    final ImmutableMap<String, RSGroupInfo> groupName2Group;
-    final ImmutableMap<TableName, RSGroupInfo> tableName2Group;
+    final Map<String, RSGroupInfo> groupName2Group;
+    final Map<TableName, RSGroupInfo> tableName2Group;
 
     RSGroupInfoHolder() {
       this(Collections.emptyMap());
     }
 
     RSGroupInfoHolder(Map<String, RSGroupInfo> rsGroupMap) {
-      ImmutableMap.Builder<String, RSGroupInfo> group2Name2GroupBuilder = ImmutableMap.builder();
-      ImmutableMap.Builder<TableName, RSGroupInfo> tableName2GroupBuilder = ImmutableMap.builder();
+      Map<String, RSGroupInfo> groupName2Group = new LinkedHashMap<>();
+      Map<TableName, RSGroupInfo> tableName2Group = new LinkedHashMap<>();
       rsGroupMap.forEach((groupName, rsGroupInfo) -> {
-        group2Name2GroupBuilder.put(groupName, rsGroupInfo);
+        groupName2Group.put(groupName, rsGroupInfo);
         if (!groupName.equals(RSGroupInfo.DEFAULT_GROUP)) {
-          rsGroupInfo.getTables()
-            .forEach(tableName -> tableName2GroupBuilder.put(tableName, rsGroupInfo));
+          rsGroupInfo.getTables().forEach(tableName -> {
+            if (tableName2Group.put(tableName, rsGroupInfo) != null) {
+              throw new IllegalArgumentException("Multiple entries with same key: " + tableName);
+            }
+          });
         }
       });
-      this.groupName2Group = group2Name2GroupBuilder.build();
-      this.tableName2Group = tableName2GroupBuilder.build();
+      this.groupName2Group = groupName2Group;
+      this.tableName2Group = tableName2Group;
     }
   }
 
