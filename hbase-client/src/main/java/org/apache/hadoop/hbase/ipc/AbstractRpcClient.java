@@ -341,14 +341,12 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
     Message param, Message returnType, final User ticket, final Address isa)
     throws ServiceException {
     BlockingRpcCallback<Message> done = new BlockingRpcCallback<>();
-    Call call = callMethod(md, hrc, param, returnType, ticket, isa, done);
+    callMethod(md, hrc, param, returnType, ticket, isa, done);
     Message val;
     try {
       val = done.get();
     } catch (IOException e) {
       throw new ServiceException(e);
-    } finally {
-      CausynthRpc.returned(call, this);
     }
     if (hrc.failed()) {
       throw new ServiceException(hrc.getFailed());
@@ -414,6 +412,7 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
   private Call callMethod(final Descriptors.MethodDescriptor md, final HBaseRpcController hrc,
     final Message param, Message returnType, final User ticket, final Address addr,
     final RpcCallback<Message> callback) {
+    long causynth = CausynthRpc.starting(md);
     Span span = new IpcClientSpanBuilder().setMethodDescriptor(md).setRemoteAddress(addr).build();
     try (Scope scope = span.makeCurrent()) {
       final MetricsConnection.CallStats cs = MetricsConnection.newCallStats();
@@ -448,7 +447,6 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
               }
             }
           }, cs);
-      CausynthRpc.leave(call, causynthClient, this);
       ConnectionId remoteId = new ConnectionId(ticket, md.getService().getName(), addr);
       int count = counter.incrementAndGet();
       try {
@@ -457,12 +455,15 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
         }
         cs.setConcurrentCallsPerServer(count);
         T connection = getConnection(remoteId);
+        CausynthRpc.sent(call, causynthClient, this);
         connection.sendRequest(call, hrc);
       } catch (Exception e) {
         call.setException(toIOE(e));
         span.end();
       }
       return call;
+    } finally {
+      CausynthRpc.ended(causynth);
     }
   }
 

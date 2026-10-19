@@ -504,7 +504,7 @@ public class MergeTableRegionsProcedure
           RegionInfo.getShortNameToLog(ri) + " UNKNOWN (Has it been garbage collected?)");
       }
       if (!state.isOpened()) {
-        throw new MergeRegionException("Unable to merge regions that are NOT online: " + ri);
+        throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-15") MergeRegionException("Unable to merge regions that are NOT online: " + ri);
       }
       // Ask the remote regionserver if regions are mergeable. If we get an IOE, report it
       // along with the failure, so we can see why regions are not mergeable at this time.

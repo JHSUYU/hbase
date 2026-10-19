@@ -89,7 +89,8 @@ public class CallRunner {
   }
 
   public void run() {
-    MessageDoors.Inbound causynth = null;
+    MessageDoors.Inbound causynth =
+      CausynthRpc.serve(call.getHeader(), call.getParam(), this.rpcServer);
     try (Scope ignored = span.makeCurrent()) {
       if (call.disconnectSince() >= 0) {
         RpcServer.LOG.debug("{}: skipped {}", Thread.currentThread().getName(), call);
@@ -115,7 +116,6 @@ public class CallRunner {
       String error = null;
       Pair<Message, ExtendedCellScanner> resultPair = null;
       RpcServer.CurCall.set(call);
-      causynth = CausynthRpc.serve(call.getHeader(), this.rpcServer);
       final Span ipcServerSpan = new IpcServerSpanBuilder(call).build();
       try (Scope ignored1 = ipcServerSpan.makeCurrent()) {
         if (!this.rpcServer.isStarted()) {
