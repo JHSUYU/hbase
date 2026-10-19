@@ -205,7 +205,9 @@ public final class CausynthHBaseCluster {
       @Override
       public JVMClusterUtil.MasterThread addMaster(Configuration c, int index) throws IOException {
         if (!windowOpen()) {
-          return super.addMaster(c, index);
+          JVMClusterUtil.MasterThread thread = super.addMaster(c, index);
+          spell(thread.getMaster(), "master", thread.getMaster().getServerName());
+          return thread;
         }
         String sourceId = reserve(MASTER, "master");
         long startup = MessageDoors.beginNodeStartup(NODE, MASTER, sourceId);
@@ -223,7 +225,9 @@ public final class CausynthHBaseCluster {
       public JVMClusterUtil.RegionServerThread addRegionServer(Configuration c, int index)
         throws IOException {
         if (!windowOpen()) {
-          return super.addRegionServer(c, index);
+          JVMClusterUtil.RegionServerThread thread = super.addRegionServer(c, index);
+          spell(thread.getRegionServer(), "rs", thread.getRegionServer().getServerName());
+          return thread;
         }
         String sourceId = reserve(REGION_SERVER, "rs");
         long startup = MessageDoors.beginNodeStartup(NODE, REGION_SERVER, sourceId);
@@ -381,6 +385,23 @@ public final class CausynthHBaseCluster {
       named(anchor, sourceId);
     }
     MessageDoors.registerNode(anchor, NODE, role, sourceId, aliases.toArray());
+    if (spelled != null) {
+      MessageDoors.spelledAs(sourceId, spelled);
+    }
+  }
+
+  /**
+   * A node the cluster makes before the window opens: its name is reserved as it is made, in the
+   * order the nodes are made, and its server name stated at once, before it writes any ZooKeeper
+   * node that spells it (its registration, once the cluster is up, keeps the name).
+   */
+  private static synchronized void spell(Object anchor, String name, ServerName serverName) {
+    String sourceId = REGISTERED.get(anchor);
+    if (sourceId == null) {
+      sourceId = reserve(null, name);
+      named(anchor, sourceId);
+    }
+    String spelled = spelling(serverName);
     if (spelled != null) {
       MessageDoors.spelledAs(sourceId, spelled);
     }

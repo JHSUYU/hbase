@@ -160,6 +160,7 @@ import org.apache.hadoop.hbase.security.UserProvider;
 import org.apache.hadoop.hbase.security.access.AbstractReadOnlyController;
 import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.CausynthNodes;
 import org.apache.hadoop.hbase.util.CompressionTest;
 import org.apache.hadoop.hbase.util.ConfigurationUtil;
 import org.apache.hadoop.hbase.util.CoprocessorConfigurationUtil;
@@ -851,12 +852,14 @@ public class HRegionServer extends HBaseServerBase<RSRpcServices>
             new RetryCounterFactory(Integer.MAX_VALUE, this.sleeper.getPeriod(), 1000 * 60 * 5);
           RetryCounter rc = rcf.create();
           while (keepLooping()) {
+            CausynthNodes.awaitRegistration(conf);
             RegionServerStartupResponse w = reportForDuty();
             if (w == null) {
               long sleepTime = rc.getBackoffTimeAndIncrementAttempts();
               LOG.warn("reportForDuty failed; sleeping {} ms and then retrying.", sleepTime);
               this.sleeper.sleep(sleepTime);
             } else {
+              CausynthNodes.registered(conf);
               handleReportForDutyResponse(w);
               break;
             }
