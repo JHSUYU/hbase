@@ -875,7 +875,10 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
 
     // Bring up mini dfs cluster. This spews a bunch of warnings about missing
     // scheme. Complaints are 'Scheme is undefined for build/test/data/dfs/name1'.
-    if (dfsCluster == null) {
+    // An automatic cluster runs on the local filesystem (CausynthHBaseCluster#configure).
+    if (CausynthHBaseCluster.automatic()) {
+      LOG.info("NOT STARTING DFS: a GraphChecker workload runs on the local filesystem");
+    } else if (dfsCluster == null) {
       LOG.info("STARTING DFS");
       dfsCluster = startMiniDFSCluster(option.getNumDataNodes(), option.getDataNodeHosts());
     } else {
@@ -900,6 +903,9 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
    */
   public SingleProcessHBaseCluster startMiniHBaseCluster(StartTestingClusterOption option)
     throws IOException, InterruptedException {
+    if (CausynthHBaseCluster.automatic()) {
+      CausynthHBaseCluster.configure(conf);
+    }
     // Now do the mini hbase cluster. Set the hbase.rootdir in config.
     createRootDir(option.isCreateRootDir());
     if (option.isCreateWALDir()) {

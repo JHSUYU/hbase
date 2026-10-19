@@ -32,19 +32,22 @@ import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureEnv;
 import org.apache.hadoop.hbase.procedure2.ProcedureExecutor;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
+import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.JVMClusterUtil;
+import org.apache.hadoop.hbase.wal.WALFactory;
 import org.apache.hadoop.hbase.zookeeper.MiniZooKeeperCluster;
-import org.apache.hadoop.hdfs.MiniDFSCluster;
-import org.apache.hadoop.hdfs.server.datanode.DataNode;
-import org.apache.hadoop.hdfs.server.namenode.NameNodeRpcServer;
 
 /**
  * What makes an HBase mini cluster a GraphChecker workload, with {@link #AUTOMATIC} set: any
  * cluster test is one as it is written.
  * <p>
+ * The cluster runs on the local filesystem, with no HDFS ({@link #configure}): its root directory
+ * is a {@code file://} path under the test's data directory, its write-ahead logs are written by
+ * the filesystem provider, and no stream capability is demanded of the local filesystem.
+ * <p>
  * Every node is registered whole as the node it is ({@link MessageDoors#registerNode}): each
- * HMaster and HRegionServer with the objects it runs its work through, the mini cluster's NameNode
- * and DataNodes, and its ZooKeeper servers, named {@code auto0/<role><i>} in the order they
+ * HMaster and HRegionServer with the objects it runs its work through, and the mini cluster's
+ * ZooKeeper servers, named {@code auto0/<role><i>} in the order they
  * registered; a master or region server the test starts later is registered as it is added, before
  * it starts. The window opens once the cluster is up, with one request of the test (client
  * {@code auto0/client0}, the testing utility and its client connection) on the thread that started
@@ -52,7 +55,7 @@ import org.apache.hadoop.hdfs.server.namenode.NameNodeRpcServer;
  * <p>
  * A case that declares its window at startup ({@link MessageDoors#startupWindow}: a bug whose fatal
  * value is set while the cluster starts, a master's activation time) has it open before the HBase
- * cluster starts, its HDFS and ZooKeeper up: those are registered then, its client connection once
+ * cluster starts, its ZooKeeper up: that is registered then, its client connection once
  * there is one, and each master and region server is constructed in a node startup under the name
  * it is then registered by ({@link #localCluster}; {@code JVMClusterUtil#start} brackets its
  * thread's start too), so what they start or create belongs to the node from the first, not to the
@@ -88,11 +91,14 @@ public final class CausynthHBaseCluster {
   }
 
   /**
-   * Before the cluster starts, on the configuration it is built from: no RPC, socket, session or
-   * idle connection of HBase, of its ZooKeeper or of its HDFS times out, and a test's own waits are
-   * as many times longer as a replay is slower.
+   * Before the cluster starts, on the configuration it is built from: the local filesystem in
+   * place of HDFS; no RPC, socket, session or idle connection of HBase or of its ZooKeeper times
+   * out, and a test's own waits are as many times longer as a replay is slower.
    */
   public static void configure(Configuration conf) {
+    conf.set("fs.defaultFS", "file:///");
+    conf.set(WALFactory.WAL_PROVIDER, "filesystem");
+    conf.setBoolean(CommonFSUtils.UNSAFE_STREAM_CAPABILITY_ENFORCE, false);
     for (String key : new String[] { HConstants.HBASE_RPC_TIMEOUT_KEY,
       HConstants.HBASE_RPC_READ_TIMEOUT_KEY, HConstants.HBASE_RPC_WRITE_TIMEOUT_KEY,
       HConstants.HBASE_RPC_SHORTOPERATION_TIMEOUT_KEY, HConstants.HBASE_CLIENT_OPERATION_TIMEOUT,
@@ -102,10 +108,6 @@ public final class CausynthHBaseCluster {
       "hbase.ipc.client.socket.timeout.read", "hbase.ipc.client.socket.timeout.write",
       "hbase.ipc.client.connection.maxidletime",
       "hbase.ipc.client.connection.minIdleTimeBeforeClose",
-      // the mini cluster's HDFS, which the WALs and store files are written to
-      "ipc.client.connection.maxidletime", "ipc.client.rpc-timeout.ms",
-      "dfs.client.socket-timeout", "dfs.datanode.socket.write.timeout",
-      "dfs.client.socketcache.expiryMsec",
       // the local cluster's waits for an active, then an initialized master
       "hbase.master.start.timeout.localHBaseCluster",
       "hbase.master.init.timeout.localHBaseCluster" }) {
@@ -115,8 +117,8 @@ public final class CausynthHBaseCluster {
   }
 
   /**
-   * The HBase cluster is about to start, its HDFS and ZooKeeper up: for a case that declares its
-   * window at startup, they are registered and the window opened on the test's thread.
+   * The HBase cluster is about to start, its ZooKeeper up: for a case that declares its window at
+   * startup, that is registered and the window opened on the test's thread.
    */
   public static synchronized void openStartupWindow(HBaseTestingUtil util) {
     if (!MessageDoors.startupWindow() || windowClient != null) {
@@ -148,12 +150,8 @@ public final class CausynthHBaseCluster {
       connection, connection.getRpcClient());
   }
 
-  /** The mini cluster's HDFS and ZooKeeper, whichever it has. */
+  /** The mini cluster's ZooKeeper, if it has one. */
   private static void registerStores(HBaseTestingUtil util) {
-    MiniDFSCluster dfs = util.getDFSCluster();
-    if (dfs != null) {
-      registerHdfs(dfs);
-    }
     MiniZooKeeperCluster zk = util.getZkCluster();
     if (zk != null) {
       registerZooKeeper(zk);
@@ -279,32 +277,6 @@ public final class CausynthHBaseCluster {
     }
     aliases.add(executor);
     return aliases;
-  }
-
-  /** The NameNode and each DataNode of the mini cluster's HDFS. */
-  private static void registerHdfs(MiniDFSCluster dfs) {
-    for (int index = 0; index < dfs.getNumNameNodes(); index++) {
-      if (dfs.getNameNode(index) == null || REGISTERED.containsKey(dfs.getNameNode(index))) {
-        continue;
-      }
-      NameNodeRpcServer rpc = (NameNodeRpcServer) dfs.getNameNodeRpc(index);
-      List<Object> aliases = new ArrayList<>();
-      aliases.add(rpc);
-      aliases.add(rpc.getClientRpcServer());
-      aliases.add(dfs.getNamesystem(index));
-      aliases.add(dfs.getNamesystem(index).getBlockManager());
-      register(dfs.getNameNode(index), "NAMENODE", "nn", aliases);
-    }
-    for (DataNode datanode : dfs.getDataNodes()) {
-      if (REGISTERED.containsKey(datanode)) {
-        continue;
-      }
-      List<Object> aliases = new ArrayList<>();
-      aliases.add(datanode.ipcServer);
-      aliases.add(datanode.getXferServer());
-      aliases.add(datanode.getSaslServer());
-      register(datanode, "DATANODE", "dn", aliases);
-    }
   }
 
   /** Each ZooKeeper server of the mini cluster, which the class keeps private. */
