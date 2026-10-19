@@ -20,29 +20,37 @@ package org.apache.hadoop.hbase.procedure2;
 import org.apache.yetus.audience.InterfaceAudience;
 
 /**
- * A procedure's step as GraphChecker work (with {@code causynth.cluster.automatic} set): handed,
- * when the procedure is made runnable ({@link AbstractProcedureScheduler#push}), from the thread
- * that made it so -- the request that submitted it, the step that yielded it or added it as a
- * child, the report that woke it -- to whichever worker runs it, as an executor's task is. A step
- * then stands on what made it runnable, in every run alike, not on the worker's turns: which
- * worker polls which procedure, and how often a worker's poll waited first, are the replay's
- * timing (a step's occurrence named by its worker's n-th poll wake was another step in a replay).
+ * A procedure's step as GraphChecker work (with {@code causynth.cluster.automatic} set). The first
+ * step is handed off where the procedure is first made runnable ({@link AbstractProcedureScheduler#push}):
+ * the request that submitted it, or the parent step that added it as a child. Every later step is
+ * handed off at the end of the step before it, on that step's worker and under the procedure's
+ * execution lock, whatever later makes it runnable again -- a yield, the report or RPC reply that
+ * wakes it (ProcedureFutureUtil's callback on a Netty thread), a timeout, its last child. A step
+ * then stands on its procedure's previous step, in every run alike: neither on a worker's n-th poll
+ * wake, nor on which reply's exchange or which timeout thread's turn happened to wake it.
  */
 @InterfaceAudience.Private
 final class CausynthStep implements Runnable {
   private static final boolean AUTOMATIC = Boolean.getBoolean("causynth.cluster.automatic");
+  private static final CausynthStep RUNNING = new CausynthStep();
   private Runnable body;
 
   private CausynthStep() {
   }
 
-  /** The procedure is made runnable on this thread: its next step is handed off from here. */
+  /** The procedure is made runnable on this thread: its first step is handed off from here. */
   static void handOff(Procedure<?> procedure) {
     if (!AUTOMATIC) {
       return;
     }
-    CausynthStep step = new CausynthStep();
-    procedure.causynthStep = step;
+    CausynthStep step;
+    synchronized (CausynthStep.class) {
+      if (procedure.causynthStep != null) {
+        return;
+      }
+      step = new CausynthStep();
+      procedure.causynthStep = step;
+    }
     execute(step);
   }
 
@@ -50,16 +58,40 @@ final class CausynthStep implements Runnable {
   private static void execute(Runnable step) {
   }
 
-  /** A worker runs the procedure's step, standing on the hand-off that made it runnable. */
+  /**
+   * A worker runs the procedure's step, standing on the hand-off that made it runnable; a step that
+   * leaves the procedure unfinished hands off the next one.
+   */
   static void run(Procedure<?> procedure, Runnable body) {
-    CausynthStep step = procedure.causynthStep;
-    if (step == null) {
+    CausynthStep step;
+    synchronized (CausynthStep.class) {
+      step = procedure.causynthStep;
+      if (step != null && step != RUNNING) {
+        procedure.causynthStep = RUNNING;
+      }
+    }
+    if (step == null || step == RUNNING) {
       body.run();
       return;
     }
-    procedure.causynthStep = null;
-    step.body = body;
-    step.run();
+    try {
+      step.body = body;
+      step.run();
+    } finally {
+      boolean finished = procedure.isFinished();
+      CausynthStep next = null;
+      synchronized (CausynthStep.class) {
+        if (finished) {
+          procedure.causynthStep = null;
+        } else {
+          next = new CausynthStep();
+          procedure.causynthStep = next;
+        }
+      }
+      if (next != null) {
+        execute(next);
+      }
+    }
   }
 
   @Override
