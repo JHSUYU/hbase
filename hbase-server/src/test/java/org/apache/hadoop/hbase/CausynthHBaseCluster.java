@@ -32,6 +32,7 @@ import org.apache.hadoop.hbase.client.AsyncClusterConnection;
 import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureEnv;
 import org.apache.hadoop.hbase.procedure2.ProcedureExecutor;
+import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.DNS;
@@ -129,7 +130,12 @@ public final class CausynthHBaseCluster {
       "hbase.ipc.client.connection.minIdleTimeBeforeClose",
       // the local cluster's waits for an active, then an initialized master
       "hbase.master.start.timeout.localHBaseCluster",
-      "hbase.master.init.timeout.localHBaseCluster" }) {
+      "hbase.master.init.timeout.localHBaseCluster",
+      // the periodic WAL rolls (a roll the disabled WAL is asked never ends the request, so its
+      // roller spins from the period on) and the periodic memstore flushes, which a recording
+      // never reaches and a replay many times slower does
+      "hbase.master.store.region.walroll.period.ms", "hbase.regionserver.logroll.period",
+      "hbase.master.store.region.flush.interval.ms", HRegion.MEMSTORE_PERIODIC_FLUSH_INTERVAL }) {
       conf.setInt(key, NEVER_MS);
     }
     conf.setFloat(Waiter.HBASE_TEST_WAIT_FOR_RATIO, WAIT_RATIO);
