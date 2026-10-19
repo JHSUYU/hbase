@@ -696,7 +696,7 @@ public class TestNamespaceAuditor {
     assertEquals(5, nstate.getRegionCount(), "Total regions count should be 5.");
 
     ADMIN.disableTable(tableName1);
-    ADMIN.restoreSnapshot(snapshot);
+    ADMIN.restoreSnapshot(snapshot, false);
 
     assertEquals(4, nstate.getRegionCount(), "Total regions count should be 4 after restore.");
 
