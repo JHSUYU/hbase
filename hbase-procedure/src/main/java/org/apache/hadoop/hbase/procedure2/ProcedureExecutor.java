@@ -2156,7 +2156,7 @@ public class ProcedureExecutor<TEnvironment> {
       executionStartTime.set(EnvironmentEdgeManager.currentTime());
       IdLock.Entry lockEntry = procExecutionLock.getLockEntry(proc.getProcId());
       try {
-        executeProcedure(proc);
+        CausynthStep.run(proc, () -> executeProcedure(proc));
       } catch (AssertionError e) {
         LOG.info("ASSERT pid=" + proc.getProcId(), e);
         throw e;
