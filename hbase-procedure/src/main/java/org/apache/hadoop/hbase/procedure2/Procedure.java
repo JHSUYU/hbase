@@ -139,7 +139,7 @@ public abstract class Procedure<TEnvironment> implements Comparable<Procedure<TE
   private boolean wasExecuted;
 
   private volatile int timeout = NO_TIMEOUT;
-  /** GraphChecker: the hand-off its next step stands on ({@link CausynthStep}), if any. */
+  /** GraphChecker: the hand-off its next step stands on, or the step running ({@link CausynthStep}). */
   volatile CausynthStep causynthStep;
   private volatile long lastUpdate;
 
