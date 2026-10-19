@@ -44,8 +44,11 @@ import org.apache.hadoop.hbase.zookeeper.ZKWatcher;
  * cluster test is one as it is written.
  * <p>
  * The cluster runs on the local filesystem, with no HDFS ({@link #configure}): its root directory
- * is a {@code file://} path under the test's data directory, its write-ahead logs are written by
- * the filesystem provider, and no stream capability is demanded of the local filesystem.
+ * is a {@code file://} path under the test's data directory and no stream capability is demanded
+ * of the local filesystem. It writes no write-ahead log (owner 2026-10-19): every WAL its region
+ * servers and its master's local region ask for is HBase's own {@code DisabledWALProvider}'s,
+ * since a log's coalescing consumer and its sync runners run whenever the appends' timing has
+ * them, so no two runs order them alike.
  * <p>
  * Every node is registered whole as the node it is ({@link MessageDoors#registerNode}): each
  * HMaster and HRegionServer with the objects it runs its work through, and the mini cluster's
@@ -69,6 +72,8 @@ import org.apache.hadoop.hbase.zookeeper.ZKWatcher;
  */
 public final class CausynthHBaseCluster {
   public static final String AUTOMATIC = "causynth.cluster.automatic";
+  /** HBase's own write-ahead log that writes nothing (package-private: named by its class). */
+  private static final String NO_WAL = "org.apache.hadoop.hbase.wal.DisabledWALProvider";
   private static final String NODE = "CLUSTER_NODE";
   private static final String MASTER = "HMASTER";
   private static final String REGION_SERVER = "REGIONSERVER";
@@ -102,7 +107,7 @@ public final class CausynthHBaseCluster {
    */
   public static void configure(Configuration conf) {
     conf.set("fs.defaultFS", "file:///");
-    conf.set(WALFactory.WAL_PROVIDER, "filesystem");
+    conf.set(WALFactory.WAL_PROVIDER, NO_WAL);
     conf.setBoolean(CommonFSUtils.UNSAFE_STREAM_CAPABILITY_ENFORCE, false);
     for (String key : new String[] { HConstants.HBASE_RPC_TIMEOUT_KEY,
       HConstants.HBASE_RPC_READ_TIMEOUT_KEY, HConstants.HBASE_RPC_WRITE_TIMEOUT_KEY,
