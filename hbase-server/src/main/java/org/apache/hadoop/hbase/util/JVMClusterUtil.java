@@ -179,17 +179,22 @@ public class JVMClusterUtil {
       return null;
     }
 
+    configuration = masters.get(0).getMaster().getConfiguration();
+    final int startTimeout =
+      Integer.parseInt(configuration.get("hbase.master.start.timeout.localHBaseCluster", "30000"));
     for (JVMClusterUtil.MasterThread t : masters) {
       configuration = t.getMaster().getConfiguration();
       start(t, t.getMaster());
+      // An automatic cluster's first master is its active one, in every run: the others start
+      // once it holds the master znode, so they wait as backups (no election race).
+      if (CausynthNodes.automatic() && t == masters.get(0)) {
+        waitForEvent(startTimeout, "active", () -> findActiveMaster(masters) != null);
+      }
     }
 
     // Wait for an active master
     // having an active master before starting the region threads allows
     // then to succeed on their connection to master
-    final int startTimeout = configuration != null
-      ? Integer.parseInt(configuration.get("hbase.master.start.timeout.localHBaseCluster", "30000"))
-      : 30000;
     waitForEvent(startTimeout, "active", () -> findActiveMaster(masters) != null);
 
     if (regionservers != null) {
