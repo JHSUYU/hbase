@@ -131,11 +131,11 @@ public class ModifyTableProcedure extends AbstractStateMachineTableProcedure<Mod
         this.unmodifiedTableDescriptor.getColumnFamilyCount()
             != this.modifiedTableDescriptor.getColumnFamilyCount()
       ) {
-        throw new HBaseIOException(
+        throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-19") HBaseIOException(
           "Cannot add or remove column families when this modification " + "won't reopen regions.");
       }
       if (isCoprocModified()) {
-        throw new HBaseIOException(
+        throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-20") HBaseIOException(
           "Can not modify Coprocessor when table modification won't reopen regions");
       }
       final Set<String> s = new HashSet<>(Arrays.asList(TableDescriptorBuilder.REGION_REPLICATION,

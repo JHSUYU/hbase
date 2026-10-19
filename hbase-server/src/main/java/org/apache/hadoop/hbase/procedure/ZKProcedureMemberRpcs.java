@@ -207,7 +207,7 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
           "Data in for starting procedure " + opName + " is illegally formatted (no pb magic). "
             + "Killing the procedure: " + Bytes.toString(data);
         LOG.error(msg);
-        throw new IllegalArgumentException(msg);
+        throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-24") IllegalArgumentException(msg);
       }
       LOG.debug("start proc data length is " + data.length);
       data = Arrays.copyOfRange(data, ProtobufUtil.lengthOfPBMagic(), data.length);

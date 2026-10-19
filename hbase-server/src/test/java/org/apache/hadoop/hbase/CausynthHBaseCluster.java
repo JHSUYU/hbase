@@ -21,6 +21,7 @@ import edu.uva.liftlab.graphchecker.runtime.MessageDoors;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -79,6 +80,9 @@ public final class CausynthHBaseCluster {
   /** The nodes registered so far, by identity, and how many of each role. */
   private static final Map<Object, String> REGISTERED = new IdentityHashMap<>();
   private static final Map<String, Integer> COUNTS = new HashMap<>();
+  /** The local clusters the mini cluster built through {@link #localCluster}. */
+  private static final Map<LocalHBaseCluster, Boolean> BUILT =
+    Collections.synchronizedMap(new IdentityHashMap<>());
   /** The test's client while the window is open, else null. */
   private static Object windowClient;
   private static long windowRequest;
@@ -175,7 +179,7 @@ public final class CausynthHBaseCluster {
   public static LocalHBaseCluster localCluster(Configuration conf, int masters, int standByMasters,
     Class<? extends HMaster> masterClass, Class<? extends HRegionServer> regionServerClass)
     throws IOException {
-    return new LocalHBaseCluster(conf, masters, standByMasters, 0, masterClass,
+    LocalHBaseCluster cluster = new LocalHBaseCluster(conf, masters, standByMasters, 0, masterClass,
       regionServerClass) {
       @Override
       public JVMClusterUtil.MasterThread addMaster(Configuration c, int index) throws IOException {
@@ -212,6 +216,52 @@ public final class CausynthHBaseCluster {
         }
       }
     };
+    BUILT.put(cluster, Boolean.TRUE);
+    return cluster;
+  }
+
+  /**
+   * A local cluster the test builds itself ({@code new LocalHBaseCluster(..)}, as a secure or a
+   * status-page test does) is a workload's cluster too: it is built on the configuration
+   * {@link #configure} prepares, its nodes are registered and the window opened on the test's
+   * thread once it is up, the test's testing utility its client, and the window closes before it
+   * shuts down. A cluster the mini cluster builds ({@link #localCluster}) is registered by
+   * {@link #registerAutomatically} instead.
+   */
+  public static void observeLocalClusters(HBaseTestingUtil util) {
+    LocalHBaseCluster.observe(new LocalHBaseCluster.Observer() {
+      @Override
+      public void constructing(Configuration conf) {
+        configure(conf);
+      }
+
+      @Override
+      public void started(LocalHBaseCluster cluster) {
+        registerLocalCluster(util, cluster);
+      }
+
+      @Override
+      public void stopping(LocalHBaseCluster cluster) {
+        if (!BUILT.containsKey(cluster)) {
+          shutdownAutomatically();
+        }
+      }
+    });
+  }
+
+  private static synchronized void registerLocalCluster(HBaseTestingUtil util,
+    LocalHBaseCluster cluster) {
+    if (BUILT.containsKey(cluster) || windowClient != null) {
+      return;
+    }
+    registerStores(util);
+    for (JVMClusterUtil.MasterThread master : cluster.getMasters()) {
+      registerMaster(master.getMaster());
+    }
+    for (JVMClusterUtil.RegionServerThread server : cluster.getRegionServers()) {
+      registerRegionServer(server.getRegionServer());
+    }
+    openWindow(util);
   }
 
   /** The test shuts its cluster down: its request ends, and so does the window. */

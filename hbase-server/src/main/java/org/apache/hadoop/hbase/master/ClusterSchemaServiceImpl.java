@@ -108,7 +108,7 @@ class ClusterSchemaServiceImpl extends AbstractService implements ClusterSchemaS
   @Override
   public NamespaceDescriptor getNamespace(String name) throws IOException {
     NamespaceDescriptor nsd = getTableNamespaceManager().get(name);
-    if (nsd == null) throw new NamespaceNotFoundException(name);
+    if (nsd == null) throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-08") NamespaceNotFoundException(name);
     return nsd;
   }
 

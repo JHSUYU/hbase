@@ -2739,7 +2739,7 @@ public class HBaseFsck extends Configured implements Closeable {
             } else if (previous.getMetaEntry() == null) {
               previous.setMetaEntry(m);
             } else {
-              throw new IOException(
+              throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-35") IOException(
                 "Two entries in " + TableName.META_TABLE_NAME + " are same " + previous);
             }
           }

@@ -501,7 +501,7 @@ public final class BackupSystemTable implements Closeable {
           !table.checkAndMutate(ACTIVE_SESSION_ROW, SESSIONS_FAMILY).qualifier(ACTIVE_SESSION_COL)
             .ifEquals(ACTIVE_SESSION_NO).thenPut(put)
         ) {
-          throw new ExclusiveOperationException();
+          throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-bugs-backup-lock-reply-lost") ExclusiveOperationException();
         }
       }
     }

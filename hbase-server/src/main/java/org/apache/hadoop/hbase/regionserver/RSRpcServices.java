@@ -1877,7 +1877,7 @@ public class RSRpcServices extends HBaseRpcServicesBase<HRegionServer>
   private void throwOnWrongStartCode(long serverStartCode) throws ServiceException {
     // check that we are the same server that this RPC is intended for.
     if (server.getServerName().getStartcode() != serverStartCode) {
-      throw new ServiceException(new DoNotRetryIOException(
+      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-31") ServiceException(new DoNotRetryIOException(
         "This RPC was intended for a " + "different server with startCode: " + serverStartCode
           + ", this server is: " + server.getServerName()));
     }

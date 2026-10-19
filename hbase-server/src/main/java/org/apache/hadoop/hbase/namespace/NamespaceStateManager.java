@@ -127,7 +127,7 @@ class NamespaceStateManager {
         (currentStatus.getRegionCount() - regionCountOfTable + incr)
             > TableNamespaceManager.getMaxRegions(nspdesc)
       ) {
-        throw new QuotaExceededException("The table " + name.getNameAsString()
+        throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-21") QuotaExceededException("The table " + name.getNameAsString()
           + " region count cannot be updated as it would exceed maximum number "
           + "of regions allowed in the namespace.  The total number of regions permitted is "
           + TableNamespaceManager.getMaxRegions(nspdesc));
@@ -165,7 +165,7 @@ class NamespaceStateManager {
       if (
         (currentStatus.getRegionCount() + numRegions) > TableNamespaceManager.getMaxRegions(nspdesc)
       ) {
-        throw new QuotaExceededException(
+        throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-22") QuotaExceededException(
           "The table " + table.getNameAsString() + " is not allowed to have " + numRegions
             + " regions. The total number of regions permitted is only "
             + TableNamespaceManager.getMaxRegions(nspdesc) + ", while current region count is "

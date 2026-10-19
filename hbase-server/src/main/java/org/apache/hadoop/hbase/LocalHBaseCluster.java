@@ -68,6 +68,25 @@ public class LocalHBaseCluster {
   private final Class<? extends HRegionServer> regionServerClass;
 
   /**
+   * What a test harness does with every local cluster, the ones a test builds directly too: it
+   * prepares the configuration before the cluster is built, and sees the cluster once it is up and
+   * before it shuts down.
+   */
+  public interface Observer {
+    void constructing(Configuration conf);
+
+    void started(LocalHBaseCluster cluster);
+
+    void stopping(LocalHBaseCluster cluster);
+  }
+
+  private static volatile Observer observer;
+
+  public static void observe(Observer observer) {
+    LocalHBaseCluster.observer = observer;
+  }
+
+  /**
    * Constructor.
    */
   public LocalHBaseCluster(final Configuration conf) throws IOException {
@@ -125,6 +144,10 @@ public class LocalHBaseCluster {
     final int noAlwaysStandByMasters, final int noRegionServers,
     final Class<? extends HMaster> masterClass,
     final Class<? extends HRegionServer> regionServerClass) throws IOException {
+    Observer current = observer;
+    if (current != null) {
+      current.constructing(conf);
+    }
     this.conf = conf;
 
     // When active, if a port selection is default then we switch to random
@@ -407,12 +430,20 @@ public class LocalHBaseCluster {
    */
   public void startup() throws IOException {
     JVMClusterUtil.startup(this.masterThreads, this.regionThreads);
+    Observer current = observer;
+    if (current != null) {
+      current.started(this);
+    }
   }
 
   /**
    * Shut down the mini HBase cluster
    */
   public void shutdown() {
+    Observer current = observer;
+    if (current != null) {
+      current.stopping(this);
+    }
     JVMClusterUtil.shutdown(this.masterThreads, this.regionThreads);
   }
 

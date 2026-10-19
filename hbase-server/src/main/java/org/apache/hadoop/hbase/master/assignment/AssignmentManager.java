@@ -762,14 +762,14 @@ public class AssignmentManager {
   private void preTransitCheck(RegionStateNode regionNode, RegionState.State[] expectedStates)
     throws HBaseIOException {
     if (regionNode.getProcedure() != null) {
-      throw new HBaseIOException(
+      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-10") HBaseIOException(
         regionNode + " is currently in transition; pid=" + regionNode.getProcedure().getProcId());
     }
     if (!regionNode.isInState(expectedStates)) {
-      throw new DoNotRetryRegionException(UNEXPECTED_STATE_REGION + regionNode);
+      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-11") DoNotRetryRegionException(UNEXPECTED_STATE_REGION + regionNode);
     }
     if (isTableDisabled(regionNode.getTable())) {
-      throw new DoNotRetryIOException(regionNode.getTable() + " is disabled for " + regionNode);
+      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-12") DoNotRetryIOException(regionNode.getTable() + " is disabled for " + regionNode);
     }
   }
 
