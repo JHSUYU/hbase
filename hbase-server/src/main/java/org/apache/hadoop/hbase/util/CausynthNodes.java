@@ -18,9 +18,12 @@
 package org.apache.hadoop.hbase.util;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.io.UncheckedIOException;
 import java.net.ServerSocket;
+import java.util.concurrent.TimeUnit;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.yetus.audience.InterfaceAudience;
 
 /**
@@ -32,17 +35,25 @@ import org.apache.yetus.audience.InterfaceAudience;
  * takes a port above every one handed out before (the first at random: replays of one case share
  * a host) where its configuration asks for any free one, and a start code that is a function of
  * its place in that order, not of the wall clock (a restarted node is a later one); its host is
- * {@code localhost} (CausynthHBaseCluster#configure). Unset elsewhere: a stock run reads its clock
- * and takes a free port.
+ * {@code localhost} (CausynthHBaseCluster#configure). Region servers register with the master in
+ * the order they were made, each once the one before it has, so the first region server is the
+ * only one online when the master first places a region (hbase:meta) in every run. Unset
+ * elsewhere: a stock run reads its clock, takes a free port and reports for duty at once.
  */
 @InterfaceAudience.Private
 public final class CausynthNodes {
   public static final String AUTOMATIC = "causynth.cluster.automatic";
   /** A node's start code, set on its own configuration when it is constructed. */
   public static final String STARTCODE = "hbase.causynth.startcode";
+  /** A region server's place in the order region servers register in, set when it is made. */
+  public static final String REGISTRATION = "hbase.causynth.registration";
   private static final long FIRST_STARTCODE = 1_700_000_000_000L;
+  private static final long REGISTRATION_WAIT_MINUTES = 5;
+  private static final Object TURN = new Object();
   private static int lastPort;
   private static int made;
+  private static int regionServers;
+  private static int registered;
 
   private CausynthNodes() {
   }
@@ -60,6 +71,43 @@ public final class CausynthNodes {
       conf.setInt(portKey, nextPort());
     }
     conf.setLong(STARTCODE, FIRST_STARTCODE + 1000L * made++);
+    if (HConstants.REGIONSERVER_PORT.equals(portKey)) {
+      conf.setInt(REGISTRATION, regionServers++);
+    }
+  }
+
+  /** A region server is about to report for duty: it waits until those made before it have. */
+  public static void awaitRegistration(Configuration conf) throws InterruptedIOException {
+    int place = conf.getInt(REGISTRATION, -1);
+    if (place < 0) {
+      return;
+    }
+    long end = System.nanoTime() + TimeUnit.MINUTES.toNanos(REGISTRATION_WAIT_MINUTES);
+    synchronized (TURN) {
+      while (registered < place) {
+        long left = TimeUnit.NANOSECONDS.toMillis(end - System.nanoTime());
+        if (left <= 0) {
+          return;
+        }
+        try {
+          TURN.wait(left);
+        } catch (InterruptedException e) {
+          throw (InterruptedIOException) new InterruptedIOException().initCause(e);
+        }
+      }
+    }
+  }
+
+  /** The master took a region server's report: the next one may report. */
+  public static void registered(Configuration conf) {
+    int place = conf.getInt(REGISTRATION, -1);
+    if (place < 0) {
+      return;
+    }
+    synchronized (TURN) {
+      registered = Math.max(registered, place + 1);
+      TURN.notifyAll();
+    }
   }
 
   /** The start code of a node built from {@code conf}: its given one, else the clock's now. */

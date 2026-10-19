@@ -31,6 +31,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HConstants;
@@ -953,7 +954,26 @@ public class RecoverableZooKeeper {
 
   /** A data read: the version it read is the message its write sent. */
   private void causynthRead(String path, Stat stat, byte[] data) {
-    MessageDoors.fetched(CAUSYNTH_ZK, path + "@" + stat.getVersion(), this, data);
+    String key = path + "@" + stat.getVersion();
+    if (data != null) {
+      CAUSYNTH_FETCHED.put(data, key);
+    }
+    MessageDoors.fetched(CAUSYNTH_ZK, key, this, data);
+  }
+
+  /** The version each array a data read returned is, by the array's identity, while it lives. */
+  private static final Map<byte[], String> CAUSYNTH_FETCHED =
+    Collections.synchronizedMap(new WeakHashMap<>());
+
+  /**
+   * GraphChecker: a reader parsed a znode's bytes, as a data read returned them, into the object
+   * it keeps: that object reads the version the bytes are ({@code MessageDoors#decoded}).
+   */
+  public static void causynthDecoded(byte[] data, Object product) {
+    String key = data == null || product == null ? null : CAUSYNTH_FETCHED.get(data);
+    if (key != null) {
+      MessageDoors.decoded(CAUSYNTH_ZK, key, product);
+    }
   }
 
   /** An exists or getChildren read: the version it returned, -1 for no node or none stated. */
