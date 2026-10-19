@@ -203,7 +203,7 @@ public class MasterAddressTracker extends ZKNodeTracker {
     }
     // TODO javadoc claims we return null in this case. :/
     if (data == null) {
-      throw new IOException("Can't get master address from ZooKeeper; znode data == null");
+      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-37") IOException("Can't get master address from ZooKeeper; znode data == null");
     }
     try {
       return parse(data).getInfoPort();

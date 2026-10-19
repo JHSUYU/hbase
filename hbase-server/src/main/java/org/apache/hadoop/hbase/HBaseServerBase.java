@@ -350,7 +350,7 @@ public abstract class HBaseServerBase<R extends HBaseRpcServicesBase<?>> extends
         + " does not belong to this host. Correct configuration parameter: "
         + (isMaster ? "hbase.master.info.bindAddress" : "hbase.regionserver.info.bindAddress");
       LOG.error(msg);
-      throw new IOException(msg);
+      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-28") IOException(msg);
     }
     // check if auto port bind enabled
     boolean auto = this.conf.getBoolean(HConstants.REGIONSERVER_INFO_PORT_AUTO, false);

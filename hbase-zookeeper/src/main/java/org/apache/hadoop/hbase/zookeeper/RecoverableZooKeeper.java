@@ -17,14 +17,21 @@
  */
 package org.apache.hadoop.hbase.zookeeper;
 
+import edu.uva.liftlab.graphchecker.runtime.MessageDoors;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.context.Scope;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.trace.TraceUtil;
@@ -37,6 +44,7 @@ import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.Op;
 import org.apache.zookeeper.OpResult;
+import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.ZooDefs;
 import org.apache.zookeeper.ZooKeeper;
@@ -73,6 +81,8 @@ import org.slf4j.LoggerFactory;
 @InterfaceAudience.Private
 public class RecoverableZooKeeper {
   private static final Logger LOG = LoggerFactory.getLogger(RecoverableZooKeeper.class);
+  /** GraphChecker's store transport: a znode version, written by one node, read by any. */
+  public static final String CAUSYNTH_ZK = "HBASE_ZK";
   // the actual ZooKeeper client instance
   private ZooKeeper zk;
   private final RetryCounterFactory retryCounterFactory;
@@ -165,7 +175,8 @@ public class RecoverableZooKeeper {
   private synchronized ZooKeeper checkZk() throws KeeperException {
     if (this.zk == null) {
       try {
-        this.zk = new ZooKeeper(quorumServers, sessionTimeout, watcher, zkClientConfig);
+        this.zk =
+          new ZooKeeper(quorumServers, sessionTimeout, causynthWatch(watcher), zkClientConfig);
       } catch (IOException ex) {
         LOG.warn("Unable to create ZooKeeper Connection", ex);
         throw new KeeperException.OperationTimeoutException();
@@ -192,6 +203,17 @@ public class RecoverableZooKeeper {
    * throw NoNodeException if the path does not exist.
    */
   public void delete(String path, int version) throws InterruptedException, KeeperException {
+    long store = MessageDoors.storingChild(CAUSYNTH_ZK, path);
+    try {
+      deleteRetrying(path, version);
+      causynthDeleted();
+    } finally {
+      causynthStored(store);
+    }
+  }
+
+  private void deleteRetrying(String path, int version)
+    throws InterruptedException, KeeperException {
     final Span span = TraceUtil.createSpan("RecoverableZookeeper.delete");
     try (Scope ignored = span.makeCurrent()) {
       RetryCounter retryCounter = retryCounterFactory.create();
@@ -243,6 +265,15 @@ public class RecoverableZooKeeper {
 
   private Stat exists(String path, Watcher watcher, Boolean watch)
     throws InterruptedException, KeeperException {
+    causynthReading(path);
+    Stat found = existsRetrying(path, watcher, watch);
+    causynthStoreRead(path, found == null ? -1 : found.getVersion(), "exists");
+    causynthWatched(path, causynthWatcher(watcher, watch));
+    return found;
+  }
+
+  private Stat existsRetrying(String path, Watcher watcher, Boolean watch)
+    throws InterruptedException, KeeperException {
     final Span span = TraceUtil.createSpan("RecoverableZookeeper.exists");
     try (Scope ignored = span.makeCurrent()) {
       RetryCounter retryCounter = retryCounterFactory.create();
@@ -250,7 +281,7 @@ public class RecoverableZooKeeper {
         try {
           Stat nodeStat;
           if (watch == null) {
-            nodeStat = checkZk().exists(path, watcher);
+            nodeStat = checkZk().exists(path, causynthWatch(watcher));
           } else {
             nodeStat = checkZk().exists(path, watch);
           }
@@ -305,6 +336,14 @@ public class RecoverableZooKeeper {
 
   private List<String> getChildren(String path, Watcher watcher, Boolean watch)
     throws InterruptedException, KeeperException {
+    causynthReading(path);
+    List<String> children = getChildrenRetrying(path, watcher, watch);
+    causynthStoreRead(path, -1, "getChildren");
+    return children;
+  }
+
+  private List<String> getChildrenRetrying(String path, Watcher watcher, Boolean watch)
+    throws InterruptedException, KeeperException {
     final Span span = TraceUtil.createSpan("RecoverableZookeeper.getChildren");
     try (Scope ignored = span.makeCurrent()) {
       RetryCounter retryCounter = retryCounterFactory.create();
@@ -312,7 +351,7 @@ public class RecoverableZooKeeper {
         try {
           List<String> children;
           if (watch == null) {
-            children = checkZk().getChildren(path, watcher);
+            children = checkZk().getChildren(path, causynthWatch(watcher));
           } else {
             children = checkZk().getChildren(path, watch);
           }
@@ -358,6 +397,22 @@ public class RecoverableZooKeeper {
 
   private byte[] getData(String path, Watcher watcher, Boolean watch, Stat stat)
     throws InterruptedException, KeeperException {
+    final Stat read = stat != null ? stat : new Stat();
+    causynthReading(path);
+    byte[] data = getDataRetrying(path, watcher, watch, read);
+    causynthRead(path, read, data);
+    try {
+      causynthReplied();
+    } catch (KeeperException lost) {
+      causynthLose(path, causynthWatcher(watcher, watch));
+      throw lost;
+    }
+    causynthWatched(path, causynthWatcher(watcher, watch));
+    return data;
+  }
+
+  private byte[] getDataRetrying(String path, Watcher watcher, Boolean watch, Stat stat)
+    throws InterruptedException, KeeperException {
     final Span span = TraceUtil.createSpan("RecoverableZookeeper.getData");
     try (Scope ignored = span.makeCurrent()) {
       RetryCounter retryCounter = retryCounterFactory.create();
@@ -365,7 +420,7 @@ public class RecoverableZooKeeper {
         try {
           byte[] revData;
           if (watch == null) {
-            revData = checkZk().getData(path, watcher, stat);
+            revData = checkZk().getData(path, causynthWatch(watcher), stat);
           } else {
             revData = checkZk().getData(path, watch, stat);
           }
@@ -407,6 +462,19 @@ public class RecoverableZooKeeper {
    * @return Stat instance
    */
   public Stat setData(String path, byte[] data, int version)
+    throws KeeperException, InterruptedException {
+    Stat written;
+    long store = MessageDoors.storing(CAUSYNTH_ZK, path);
+    try {
+      written = setDataRetrying(path, data, version);
+      causynthWrote(path, written.getVersion(), data);
+    } finally {
+      causynthStored(store);
+    }
+    return written;
+  }
+
+  private Stat setDataRetrying(String path, byte[] data, int version)
     throws KeeperException, InterruptedException {
     final Span span = TraceUtil.createSpan("RecoverableZookeeper.setData");
     try (Scope ignored = span.makeCurrent()) {
@@ -532,6 +600,19 @@ public class RecoverableZooKeeper {
    * </p>
    */
   public String create(String path, byte[] data, List<ACL> acl, CreateMode createMode)
+    throws KeeperException, InterruptedException {
+    String created;
+    long store = causynthStoring(path, createMode);
+    try {
+      created = createRetrying(path, data, acl, createMode);
+      causynthWrote(created, 0, data);
+    } finally {
+      causynthStored(store);
+    }
+    return created;
+  }
+
+  private String createRetrying(String path, byte[] data, List<ACL> acl, CreateMode createMode)
     throws KeeperException, InterruptedException {
     final Span span = TraceUtil.createSpan("RecoverableZookeeper.create");
     try (Scope ignored = span.makeCurrent()) {
@@ -664,6 +745,24 @@ public class RecoverableZooKeeper {
    * Run multiple operations in a transactional manner. Retry before throwing exception
    */
   public List<OpResult> multi(Iterable<Op> ops) throws KeeperException, InterruptedException {
+    List<OpResult> results;
+    List<Long> stores = new ArrayList<>();
+    for (Op each : ops) {
+      stores.add(causynthStoring(each));
+    }
+    try {
+      results = multiRetrying(ops);
+      causynthWrote(ops, results);
+    } finally {
+      for (long store : stores) {
+        causynthStored(store);
+      }
+    }
+    return results;
+  }
+
+  private List<OpResult> multiRetrying(Iterable<Op> ops)
+    throws KeeperException, InterruptedException {
     final Span span = TraceUtil.createSpan("RecoverableZookeeper.multi");
     try (Scope ignored = span.makeCurrent()) {
       RetryCounter retryCounter = retryCounterFactory.create();
@@ -767,5 +866,161 @@ public class RecoverableZooKeeper {
 
   public String getIdentifier() {
     return identifier;
+  }
+
+  /**
+   * GraphChecker: per watcher, the paths whose data read's reply a fault lost after ZooKeeper
+   * applied it ({@link #causynthReplied}): the server fires that watch, and a client that never got
+   * the reply has none registered for it and drops the event ({@link #causynthDropped}); a later
+   * data read of the path whose reply arrives registers it again ({@link #causynthWatched}).
+   */
+  private final Map<Watcher, Set<String>> causynthLost =
+    Collections.synchronizedMap(new IdentityHashMap<>());
+
+  /** A write of {@code data} made this version: what the store carries. */
+  private void causynthWrote(String path, int version, byte[] data) {
+    MessageDoors.stored(CAUSYNTH_ZK, path + "@" + version, this, data);
+  }
+
+  /** Each create and set of a multi made its version, filed once the multi returned. */
+  private void causynthWrote(Iterable<Op> ops, List<OpResult> results) {
+    Iterator<Op> op = ops.iterator();
+    for (OpResult result : results) {
+      Op each = op.hasNext() ? op.next() : null;
+      if (result instanceof OpResult.CreateResult) {
+        causynthWrote(((OpResult.CreateResult) result).getPath(), 0, causynthData(each));
+      } else if (result instanceof OpResult.SetDataResult && each != null) {
+        causynthWrote(each.getPath(), ((OpResult.SetDataResult) result).getStat().getVersion(),
+          causynthData(each));
+      }
+    }
+  }
+
+  /** Where a delete returns to its caller, after the retries: its write door's place. */
+  private static void causynthDeleted() {
+  }
+
+  /**
+   * Where a data read's reply reaches its caller, after the retries: the read's door is woven
+   * before it, so a fault there is the reply lost -- ZooKeeper applied the read, and a client
+   * registers a watch only with a delivered reply.
+   */
+  private static void causynthReplied() throws KeeperException {
+  }
+
+  /**
+   * A write's turn at the path it writes, closed by {@link #causynthStored} in a finally around
+   * the write and its {@link #causynthWrote}; a sequential create takes the next number of its
+   * parent, and a delete moves the parent's child counter: theirs is the parent's.
+   */
+  private static long causynthStoring(String path, CreateMode mode) {
+    return mode.isSequential()
+      ? MessageDoors.storingChild(CAUSYNTH_ZK, path)
+      : MessageDoors.storing(CAUSYNTH_ZK, path);
+  }
+
+  private static long causynthStoring(Op op) {
+    if (op.getType() == ZooDefs.OpCode.delete) {
+      return MessageDoors.storingChild(CAUSYNTH_ZK, op.getPath());
+    }
+    org.apache.jute.Record request = op.toRequestRecord();
+    if (request instanceof CreateRequest) {
+      return causynthStoring(op.getPath(),
+        CreateMode.fromFlag(((CreateRequest) request).getFlags(), CreateMode.PERSISTENT));
+    }
+    return MessageDoors.storing(CAUSYNTH_ZK, op.getPath());
+  }
+
+  /** What a multi's create or set writes, or null. */
+  private static byte[] causynthData(Op op) {
+    if (op == null) {
+      return null;
+    }
+    org.apache.jute.Record request = op.toRequestRecord();
+    return request instanceof CreateRequest ? ((CreateRequest) request).getData()
+      : request instanceof SetDataRequest ? ((SetDataRequest) request).getData()
+      : null;
+  }
+
+  private static void causynthStored(long store) {
+    MessageDoors.storeEnded(CAUSYNTH_ZK, store);
+  }
+
+  /** A read's turn at the path it reads (a getChildren's: the parent), before the retries. */
+  private static void causynthReading(String path) {
+    MessageDoors.reading(CAUSYNTH_ZK, path);
+  }
+
+  /** A data read: the version it read is the message its write sent. */
+  private void causynthRead(String path, Stat stat, byte[] data) {
+    MessageDoors.fetched(CAUSYNTH_ZK, path + "@" + stat.getVersion(), this, data);
+  }
+
+  /** An exists or getChildren read: the version it returned, -1 for no node or none stated. */
+  private void causynthStoreRead(String path, int version, String op) {
+    MessageDoors.storeRead(CAUSYNTH_ZK, path + "@" + version, op, this);
+  }
+
+  /** The watcher a read registers: its own, the client's default one, or none. */
+  private Watcher causynthWatcher(Watcher watcher, Boolean watch) {
+    return watch == null ? watcher : watch ? this.watcher : null;
+  }
+
+  private void causynthLose(String path, Watcher watcher) {
+    if (watcher != null) {
+      causynthLost.computeIfAbsent(watcher, w -> ConcurrentHashMap.newKeySet()).add(path);
+    }
+  }
+
+  /** A data read (getData, exists) whose reply arrived registers the data watch again. */
+  private void causynthWatched(String path, Watcher watcher) {
+    Set<String> lost = watcher == null ? null : causynthLost.get(watcher);
+    if (lost != null) {
+      lost.remove(path);
+    }
+  }
+
+  /** Whether the event is the data event a lost reply's unregistered watch drops. */
+  private boolean causynthDropped(Watcher watcher, WatchedEvent event) {
+    if (
+      event.getPath() == null || event.getType() == Watcher.Event.EventType.NodeChildrenChanged
+    ) {
+      return false;
+    }
+    Set<String> lost = causynthLost.get(watcher);
+    return lost != null && lost.remove(event.getPath());
+  }
+
+  /** Every watcher this client hands ZooKeeper, so a lost reply's event can be dropped. */
+  private Watcher causynthWatch(Watcher watcher) {
+    return watcher == null || watcher instanceof CausynthWatch
+      ? watcher
+      : new CausynthWatch(watcher);
+  }
+
+  /** A watcher as ZooKeeper holds it: equal to another of the same watcher. */
+  private final class CausynthWatch implements Watcher {
+    private final Watcher watcher;
+
+    private CausynthWatch(Watcher watcher) {
+      this.watcher = watcher;
+    }
+
+    @Override
+    public void process(WatchedEvent event) {
+      if (!causynthDropped(watcher, event)) {
+        watcher.process(event);
+      }
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      return other instanceof CausynthWatch && watcher.equals(((CausynthWatch) other).watcher);
+    }
+
+    @Override
+    public int hashCode() {
+      return watcher.hashCode();
+    }
   }
 }

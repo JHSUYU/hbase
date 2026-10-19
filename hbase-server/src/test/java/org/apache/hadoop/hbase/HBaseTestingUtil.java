@@ -325,6 +325,9 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
    */
   public HBaseTestingUtil(@Nullable Configuration conf) {
     super(conf);
+    if (CausynthHBaseCluster.automatic()) {
+      CausynthHBaseCluster.observeLocalClusters(this);
+    }
 
     // a hbase checksum verification failure will cause unit tests to fail
     ChecksumUtil.generateExceptionForChecksumFailureForTest(true);
@@ -664,6 +667,12 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
 
   public MiniDFSCluster startMiniDFSCluster(int servers, final String[] racks, String[] hosts)
     throws Exception {
+    // An automatic cluster runs on the local filesystem (CausynthHBaseCluster#configure), whoever
+    // asks for an HDFS: the mini cluster's start or the test itself.
+    if (CausynthHBaseCluster.automatic()) {
+      LOG.info("NOT STARTING DFS: a GraphChecker workload runs on the local filesystem");
+      return null;
+    }
     createDirsAndSetProperties();
     EditLogFileOutputStream.setShouldSkipFsyncForTesting(true);
 
@@ -875,10 +884,7 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
 
     // Bring up mini dfs cluster. This spews a bunch of warnings about missing
     // scheme. Complaints are 'Scheme is undefined for build/test/data/dfs/name1'.
-    // An automatic cluster runs on the local filesystem (CausynthHBaseCluster#configure).
-    if (CausynthHBaseCluster.automatic()) {
-      LOG.info("NOT STARTING DFS: a GraphChecker workload runs on the local filesystem");
-    } else if (dfsCluster == null) {
+    if (dfsCluster == null) {
       LOG.info("STARTING DFS");
       dfsCluster = startMiniDFSCluster(option.getNumDataNodes(), option.getDataNodeHosts());
     } else {

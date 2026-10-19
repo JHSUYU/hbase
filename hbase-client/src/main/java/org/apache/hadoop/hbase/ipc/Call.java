@@ -66,8 +66,7 @@ class Call {
   String causynthCorrelation = "";
   String causynthTrace = "";
   String causynthSymbolic = "";
-  String causynthResponseTrace = "";
-  String causynthResponseSymbolic = "";
+  Object causynthOwner;
 
   Call(int id, final Descriptors.MethodDescriptor md, Message param,
     final ExtendedCellScanner cells, final Message responseDefaultType, int timeout, int priority,
