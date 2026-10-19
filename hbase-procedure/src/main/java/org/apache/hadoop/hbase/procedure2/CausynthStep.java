@@ -17,22 +17,35 @@
  */
 package org.apache.hadoop.hbase.procedure2;
 
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import org.apache.yetus.audience.InterfaceAudience;
 
 /**
- * A procedure's step as GraphChecker work (with {@code causynth.cluster.automatic} set). The first
- * step is handed off where the procedure is first made runnable ({@link AbstractProcedureScheduler#push}):
+ * A procedure's step as GraphChecker work (with {@code causynth.cluster.automatic} set), its start
+ * filed at each {@code HANDS.execute}. The first step is handed off where the procedure is first
+ * made runnable ({@link AbstractProcedureScheduler#push}):
  * the request that submitted it, or the parent step that added it as a child. Every later step is
  * handed off at the end of the step before it, on that step's worker and under the procedure's
  * execution lock, whatever later makes it runnable again -- a yield, the report or RPC reply that
  * wakes it (ProcedureFutureUtil's callback on a Netty thread), a timeout, its last child. A step
  * then stands on its procedure's previous step, in every run alike: neither on a worker's n-th poll
- * wake, nor on which reply's exchange or which timeout thread's turn happened to wake it.
+ * wake, nor on which reply's exchange or which timeout thread's turn happened to wake it. A step is
+ * handed to a worker of its own (a {@link SynchronousQueue} pool's hand-off, which runs nothing):
+ * held where it runs, it holds that worker alone, the scheduler's other procedures going to the
+ * others, so a confirmation may order it in place.
  */
 @InterfaceAudience.Private
 final class CausynthStep implements Runnable {
   private static final boolean AUTOMATIC = Boolean.getBoolean("causynth.cluster.automatic");
   private static final CausynthStep RUNNING = new CausynthStep();
+  private static final ThreadPoolExecutor HANDS =
+    new ThreadPoolExecutor(0, 1, 1, TimeUnit.SECONDS, new SynchronousQueue<>()) {
+      @Override
+      public void execute(Runnable step) {
+      }
+    };
   private Runnable body;
 
   private CausynthStep() {
@@ -51,11 +64,7 @@ final class CausynthStep implements Runnable {
       step = new CausynthStep();
       procedure.causynthStep = step;
     }
-    execute(step);
-  }
-
-  /** The hand-off: GraphChecker files the step's start at this call. */
-  private static void execute(Runnable step) {
+    HANDS.execute(step);
   }
 
   /**
@@ -89,7 +98,7 @@ final class CausynthStep implements Runnable {
         }
       }
       if (next != null) {
-        execute(next);
+        HANDS.execute(next);
       }
     }
   }
