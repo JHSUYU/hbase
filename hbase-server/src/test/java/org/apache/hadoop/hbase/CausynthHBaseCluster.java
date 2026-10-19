@@ -36,6 +36,7 @@ import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.JVMClusterUtil;
 import org.apache.hadoop.hbase.wal.WALFactory;
 import org.apache.hadoop.hbase.zookeeper.MiniZooKeeperCluster;
+import org.apache.hadoop.hbase.zookeeper.ZKWatcher;
 
 /**
  * What makes an HBase mini cluster a GraphChecker workload, with {@link #AUTOMATIC} set: any
@@ -244,7 +245,7 @@ public final class CausynthHBaseCluster {
     aliases.add(master.getServerManager());
     aliases.add(master.getSplitWALManager());
     aliases.add(master.getMasterWalManager());
-    register(master, MASTER, "master", aliases);
+    register(master, MASTER, "master", aliases, spelling(master.getServerName()));
   }
 
   /**
@@ -258,7 +259,7 @@ public final class CausynthHBaseCluster {
       server.getAsyncClusterConnection(), server.getExecutorService());
     aliases.add(server.getRSRpcServices());
     aliases.add(server.getWalFactory());
-    register(server, REGION_SERVER, "rs", aliases);
+    register(server, REGION_SERVER, "rs", aliases, spelling(server.getServerName()));
   }
 
   /** Whether the window is open: a node the test adds now is registered as it is added. */
@@ -266,11 +267,14 @@ public final class CausynthHBaseCluster {
     return windowClient != null;
   }
 
-  private static List<Object> serverAliases(Object rpcServer, Object zooKeeper,
+  private static List<Object> serverAliases(Object rpcServer, ZKWatcher zooKeeper,
     AsyncClusterConnection connection, Object executor) {
     List<Object> aliases = new ArrayList<>();
     aliases.add(rpcServer);
     aliases.add(zooKeeper);
+    if (zooKeeper != null) {
+      aliases.add(zooKeeper.getRecoverableZooKeeper());
+    }
     aliases.add(connection);
     if (connection != null) {
       aliases.add(connection.getRpcClient());
@@ -292,18 +296,28 @@ public final class CausynthHBaseCluster {
     } catch (ReflectiveOperationException | RuntimeException unreadable) {
       // the cluster object alone, then
     }
-    register(zk, "ZOOKEEPER", "zk", aliases);
+    register(zk, "ZOOKEEPER", "zk", aliases, null);
   }
 
-  /** A node under the name it was first given, else the next of its role. */
+  /**
+   * A node under the name it was first given, else the next of its role; {@code spelled}, its
+   * server name ({@code host,port,startcode}) in this run only, which its ZooKeeper nodes spell.
+   */
   private static synchronized void register(Object anchor, String role, String name,
-    List<Object> aliases) {
+    List<Object> aliases, String spelled) {
     String sourceId = REGISTERED.get(anchor);
     if (sourceId == null) {
       sourceId = reserve(role, name);
       named(anchor, sourceId);
     }
     MessageDoors.registerNode(anchor, NODE, role, sourceId, aliases.toArray());
+    if (spelled != null) {
+      MessageDoors.spelledAs(sourceId, spelled);
+    }
+  }
+
+  private static String spelling(ServerName serverName) {
+    return serverName == null ? null : serverName.toString();
   }
 
   /** The next name of a role's nodes: {@code auto0/<name><i>}, in the order they are named. */
