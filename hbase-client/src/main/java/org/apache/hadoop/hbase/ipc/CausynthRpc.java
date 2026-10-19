@@ -46,13 +46,6 @@ public final class CausynthRpc {
   }
 
   static long starting(Descriptors.MethodDescriptor md) {
-    MessageDoors.Inbound served = MessageDoors.current();
-    if (
-      served != null && MessageDoors.RESPONSE.equals(served.half)
-        && served.correlationId.startsWith(CORRELATION)
-    ) {
-      return 0L;
-    }
     return MessageDoors.requestStarting(TRANSPORT, verb(md), 1);
   }
 
