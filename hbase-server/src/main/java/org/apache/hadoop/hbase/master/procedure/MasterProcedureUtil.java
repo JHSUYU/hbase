@@ -30,6 +30,7 @@ import org.apache.hadoop.hbase.procedure2.Procedure;
 import org.apache.hadoop.hbase.procedure2.ProcedureException;
 import org.apache.hadoop.hbase.procedure2.ProcedureExecutor;
 import org.apache.hadoop.hbase.rsgroup.RSGroupInfo;
+import org.apache.hadoop.hbase.rsgroup.RSGroupInfoManager;
 import org.apache.hadoop.hbase.security.User;
 import org.apache.hadoop.hbase.util.NonceKey;
 import org.apache.hadoop.security.UserGroupInformation;
@@ -217,16 +218,11 @@ public final class MasterProcedureUtil {
     }
   }
 
-  @FunctionalInterface
-  public interface RSGroupGetter {
-    RSGroupInfo get(String groupName) throws IOException;
-  }
-
-  public static RSGroupInfo checkGroupExists(RSGroupGetter getter, Optional<String> optGroupName,
-    Supplier<String> forWhom) throws IOException {
+  public static RSGroupInfo checkGroupExists(RSGroupInfoManager groups,
+    Optional<String> optGroupName, Supplier<String> forWhom) throws IOException {
     if (optGroupName.isPresent()) {
       String groupName = optGroupName.get();
-      RSGroupInfo group = getter.get(groupName);
+      RSGroupInfo group = groups.getRSGroup(groupName);
       if (group == null) {
         throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-bugs-ns-rsgroup-removal") ConstraintException(
           "Region server group " + groupName + " for " + forWhom.get() + " does not exit");

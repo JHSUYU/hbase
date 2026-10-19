@@ -308,7 +308,7 @@ public class CreateTableProcedure extends AbstractStateMachineTableProcedure<Cre
       // do not check rs group for system tables as we may block the bootstrap.
       Supplier<String> forWhom = () -> "table " + tableName;
       RSGroupInfo rsGroupInfo = MasterProcedureUtil.checkGroupExists(
-        env.getMasterServices().getRSGroupInfoManager()::getRSGroup,
+        env.getMasterServices().getRSGroupInfoManager(),
         tableDescriptor.getRegionServerGroup(), forWhom);
       if (rsGroupInfo == null) {
         // we do not set rs group info on table, check if we have one on namespace
@@ -316,7 +316,7 @@ public class CreateTableProcedure extends AbstractStateMachineTableProcedure<Cre
         NamespaceDescriptor nd = env.getMasterServices().getClusterSchema().getNamespace(namespace);
         forWhom = () -> "table " + tableName + "(inherit from namespace)";
         rsGroupInfo = MasterProcedureUtil.checkGroupExists(
-          env.getMasterServices().getRSGroupInfoManager()::getRSGroup,
+          env.getMasterServices().getRSGroupInfoManager(),
           MasterProcedureUtil.getNamespaceGroup(nd), forWhom);
       }
       MasterProcedureUtil.checkGroupNotEmpty(rsGroupInfo, forWhom);

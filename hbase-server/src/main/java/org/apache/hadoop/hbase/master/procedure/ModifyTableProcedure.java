@@ -468,7 +468,7 @@ public class ModifyTableProcedure extends AbstractStateMachineTableProcedure<Mod
     ) {
       Supplier<String> forWhom = () -> "table " + getTableName();
       RSGroupInfo rsGroupInfo = MasterProcedureUtil.checkGroupExists(
-        env.getMasterServices().getRSGroupInfoManager()::getRSGroup,
+        env.getMasterServices().getRSGroupInfoManager(),
         modifiedTableDescriptor.getRegionServerGroup(), forWhom);
       MasterProcedureUtil.checkGroupNotEmpty(rsGroupInfo, forWhom);
     }
