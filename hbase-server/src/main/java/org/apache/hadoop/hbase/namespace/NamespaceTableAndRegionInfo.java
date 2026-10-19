@@ -21,7 +21,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.yetus.audience.InterfaceAudience;
 
@@ -34,7 +33,7 @@ import org.apache.hbase.thirdparty.com.google.common.base.Joiner;
 @InterfaceAudience.Private
 class NamespaceTableAndRegionInfo {
   private String name;
-  private Map<TableName, AtomicInteger> tableAndRegionInfo;
+  private Map<TableName, Integer> tableAndRegionInfo;
 
   public NamespaceTableAndRegionInfo(String namespace) {
     this.name = namespace;
@@ -63,15 +62,15 @@ class NamespaceTableAndRegionInfo {
    */
   synchronized int getRegionCount() {
     int regionCount = 0;
-    for (Entry<TableName, AtomicInteger> entry : this.tableAndRegionInfo.entrySet()) {
-      regionCount = regionCount + entry.getValue().get();
+    for (Entry<TableName, Integer> entry : this.tableAndRegionInfo.entrySet()) {
+      regionCount = regionCount + entry.getValue();
     }
     return regionCount;
   }
 
   synchronized int getRegionCountOfTable(TableName tableName) {
     if (tableAndRegionInfo.containsKey(tableName)) {
-      return this.tableAndRegionInfo.get(tableName).get();
+      return this.tableAndRegionInfo.get(tableName);
     } else {
       return -1;
     }
@@ -87,7 +86,7 @@ class NamespaceTableAndRegionInfo {
         "Table : " + tableName + " does not belong to namespace " + name);
     }
     if (!tableAndRegionInfo.containsKey(tableName)) {
-      tableAndRegionInfo.put(tableName, new AtomicInteger(regionCount));
+      tableAndRegionInfo.put(tableName, regionCount);
     } else {
       throw new IllegalStateException("Table already in the cache " + tableName);
     }
@@ -98,11 +97,15 @@ class NamespaceTableAndRegionInfo {
   }
 
   synchronized int incRegionCountForTable(TableName tableName, int count) {
-    return tableAndRegionInfo.get(tableName).addAndGet(count);
+    int updated = tableAndRegionInfo.get(tableName) + count;
+    tableAndRegionInfo.put(tableName, updated);
+    return updated;
   }
 
   synchronized int decrementRegionCountForTable(TableName tableName, int count) {
-    return tableAndRegionInfo.get(tableName).decrementAndGet();
+    int updated = tableAndRegionInfo.get(tableName) - 1;
+    tableAndRegionInfo.put(tableName, updated);
+    return updated;
   }
 
   @Override
