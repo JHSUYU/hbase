@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.zookeeper;
 
 import static org.apache.zookeeper.client.FourLetterWordMain.send4LetterWord;
 
+import edu.uva.liftlab.graphchecker.runtime.Sessions;
 import java.io.File;
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -30,7 +31,10 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.net.Address;
@@ -38,6 +42,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Threads;
 import org.apache.yetus.audience.InterfaceAudience;
+import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.common.X509Exception;
 import org.apache.zookeeper.server.NIOServerCnxnFactory;
 import org.apache.zookeeper.server.ZooKeeperServer;
@@ -75,6 +80,60 @@ public class MiniZooKeeperCluster {
   private int tickTime = 0;
 
   private final Configuration configuration;
+
+  /** GraphChecker: the clusters serving now, whose sessions a planted expiry may end. */
+  private static final List<MiniZooKeeperCluster> CAUSYNTH_SERVING = new CopyOnWriteArrayList<>();
+
+  static {
+    Sessions.expirer(MiniZooKeeperCluster::causynthExpire);
+  }
+
+  /**
+   * GraphChecker: a planted SessionExpired made real ({@code Sessions#expires}): the session of
+   * the door's client expired at the in-process server that holds it -- the server deletes its
+   * ephemeral nodes, its watcher sees Expired (a master or region server aborts) and its next
+   * operations fail by themselves. The server's close is awaited (bounded), so every run sees the
+   * same store after it. False for an owner that is no ZooKeeper client, or a session no serving
+   * cluster holds.
+   */
+  static boolean causynthExpire(Object owner) {
+    long session = owner instanceof RecoverableZooKeeper
+      ? ((RecoverableZooKeeper) owner).getSessionId()
+      : owner instanceof ZooKeeper ? ((ZooKeeper) owner).getSessionId()
+      : -1;
+    if (session == -1) {
+      return false;
+    }
+    for (MiniZooKeeperCluster cluster : CAUSYNTH_SERVING) {
+      List<ZooKeeperServer> servers;
+      try {
+        servers = new ArrayList<>(cluster.zooKeeperServers);
+      } catch (RuntimeException changing) {
+        continue;
+      }
+      for (ZooKeeperServer server : servers) {
+        Map<Long, Integer> sessions;
+        try {
+          sessions = server.getZKDatabase().getSessionWithTimeOuts();
+        } catch (RuntimeException shutDown) {
+          continue;
+        }
+        if (!sessions.containsKey(session)) {
+          continue;
+        }
+        server.expire(session);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (
+          (sessions.containsKey(session) || !server.getZKDatabase().getEphemerals(session).isEmpty())
+            && System.nanoTime() < deadline
+        ) {
+          Thread.yield();
+        }
+        return true;
+      }
+    }
+    return false;
+  }
 
   public MiniZooKeeperCluster() {
     this(new Configuration());
@@ -282,6 +341,7 @@ public class MiniZooKeeperCluster {
     // set the first one to be active ZK; Others are backups
     activeZKServerIndex = 0;
     started = true;
+    CAUSYNTH_SERVING.add(this);
     int clientPort = clientPortList.get(activeZKServerIndex);
     LOG.info("Started MiniZooKeeperCluster and ran 'stat' on client port={}", clientPort);
     return clientPort;
@@ -321,6 +381,7 @@ public class MiniZooKeeperCluster {
    * @throws IOException if waiting for the shutdown of a server fails
    */
   public void shutdown() throws IOException {
+    CAUSYNTH_SERVING.remove(this);
     // shut down all the zk servers
     for (int i = 0; i < standaloneServerFactoryList.size(); i++) {
       NIOServerCnxnFactory standaloneServerFactory = standaloneServerFactoryList.get(i);
