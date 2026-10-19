@@ -421,10 +421,17 @@ public abstract class RpcServer implements RpcServerInterface, ConfigurationObse
     LOG.info("Refreshed super and proxy users successfully");
   }
 
+  /**
+   * GraphChecker workaround (hbase-adhoc-34, owner 2026-10-19: no Kerberos): set, every server's
+   * RPC server runs its token secret manager -- its leader election and key distribution through
+   * ZooKeeper -- as a secure cluster's does, though its connections stay simple.
+   */
+  public static final String CAUSYNTH_TOKEN_SECRETS = "causynth.hbase.token.secrets";
+
   protected AuthenticationTokenSecretManager createSecretManager() {
-    if (!isSecurityEnabled) return null;
     if (server == null) return null;
     Configuration conf = server.getConfiguration();
+    if (!isSecurityEnabled && !conf.getBoolean(CAUSYNTH_TOKEN_SECRETS, false)) return null;
     long keyUpdateInterval = conf.getLong("hbase.auth.key.update.interval", 24 * 60 * 60 * 1000);
     long maxAge = conf.getLong("hbase.auth.token.max.lifetime", 7 * 24 * 60 * 60 * 1000);
     return new AuthenticationTokenSecretManager(conf, server.getZooKeeper(),
