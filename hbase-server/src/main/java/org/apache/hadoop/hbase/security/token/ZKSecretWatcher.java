@@ -22,6 +22,7 @@ import java.util.List;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.log.HBaseMarkers;
 import org.apache.hadoop.hbase.util.Writables;
+import org.apache.hadoop.hbase.zookeeper.RecoverableZooKeeper;
 import org.apache.hadoop.hbase.zookeeper.ZKListener;
 import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.hadoop.hbase.zookeeper.ZKWatcher;
@@ -105,6 +106,7 @@ public class ZKSecretWatcher extends ZKListener {
 
         AuthenticationKey key =
           (AuthenticationKey) Writables.getWritable(data, new AuthenticationKey());
+        RecoverableZooKeeper.causynthDecoded(data, key);
         secretManager.addKey(key);
       } catch (KeeperException ke) {
         LOG.error(HBaseMarkers.FATAL, "Error reading data from zookeeper", ke);
@@ -147,6 +149,7 @@ public class ZKSecretWatcher extends ZKListener {
         }
         AuthenticationKey key =
           (AuthenticationKey) Writables.getWritable(data, new AuthenticationKey());
+        RecoverableZooKeeper.causynthDecoded(data, key);
         secretManager.addKey(key);
       } catch (IOException ioe) {
         LOG.error(HBaseMarkers.FATAL,

@@ -149,7 +149,10 @@ public class MasterAddressTracker extends ZKNodeTracker {
    */
   public ServerName getMasterAddress(final boolean refresh) {
     try {
-      return ProtobufUtil.parseServerNameFrom(super.getData(refresh));
+      byte[] data = super.getData(refresh);
+      ServerName master = ProtobufUtil.parseServerNameFrom(data);
+      RecoverableZooKeeper.causynthDecoded(data, master);
+      return master;
     } catch (DeserializationException e) {
       LOG.warn("Failed parse", e);
       return null;
@@ -177,7 +180,9 @@ public class MasterAddressTracker extends ZKNodeTracker {
       throw new IOException("Can't get master address from ZooKeeper; znode data == null");
     }
     try {
-      return ProtobufUtil.parseServerNameFrom(data);
+      ServerName master = ProtobufUtil.parseServerNameFrom(data);
+      RecoverableZooKeeper.causynthDecoded(data, master);
+      return master;
     } catch (DeserializationException e) {
       KeeperException ke = new KeeperException.DataInconsistencyException();
       ke.initCause(e);
