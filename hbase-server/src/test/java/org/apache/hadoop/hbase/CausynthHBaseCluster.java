@@ -34,6 +34,7 @@ import org.apache.hadoop.hbase.master.procedure.MasterProcedureEnv;
 import org.apache.hadoop.hbase.procedure2.ProcedureExecutor;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
+import org.apache.hadoop.hbase.util.DNS;
 import org.apache.hadoop.hbase.util.JVMClusterUtil;
 import org.apache.hadoop.hbase.wal.WALFactory;
 import org.apache.hadoop.hbase.zookeeper.MiniZooKeeperCluster;
@@ -48,7 +49,11 @@ import org.apache.hadoop.hbase.zookeeper.ZKWatcher;
  * of the local filesystem. It writes no write-ahead log (owner 2026-10-19): every WAL its region
  * servers and its master's local region ask for is HBase's own {@code DisabledWALProvider}'s,
  * since a log's coalescing consumer and its sync runners run whenever the appends' timing has
- * them, so no two runs order them alike.
+ * them, so no two runs order them alike. Its servers are named alike in every run: each one's
+ * host is {@code localhost} (the recording and a replay run on different machines), its port the
+ * next above the ones before and its start code a function of its place among them
+ * ({@code CausynthNodes}), so the master's sorted servers, which assignment draws from, are in the
+ * order the nodes were made.
  * <p>
  * Every node is registered whole as the node it is ({@link MessageDoors#registerNode}): each
  * HMaster and HRegionServer with the objects it runs its work through, and the mini cluster's
@@ -74,6 +79,8 @@ public final class CausynthHBaseCluster {
   public static final String AUTOMATIC = "causynth.cluster.automatic";
   /** HBase's own write-ahead log that writes nothing (package-private: named by its class). */
   private static final String NO_WAL = "org.apache.hadoop.hbase.wal.DisabledWALProvider";
+  /** Every server's host: one machine, whichever runs the recording or a replay. */
+  private static final String LOCALHOST = "localhost";
   private static final String NODE = "CLUSTER_NODE";
   private static final String MASTER = "HMASTER";
   private static final String REGION_SERVER = "REGIONSERVER";
@@ -108,6 +115,8 @@ public final class CausynthHBaseCluster {
   public static void configure(Configuration conf) {
     conf.set("fs.defaultFS", "file:///");
     conf.set(WALFactory.WAL_PROVIDER, NO_WAL);
+    conf.set(DNS.MASTER_HOSTNAME_KEY, LOCALHOST);
+    conf.set(DNS.UNSAFE_RS_HOSTNAME_KEY, LOCALHOST);
     conf.setBoolean(CommonFSUtils.UNSAFE_STREAM_CAPABILITY_ENFORCE, false);
     for (String key : new String[] { HConstants.HBASE_RPC_TIMEOUT_KEY,
       HConstants.HBASE_RPC_READ_TIMEOUT_KEY, HConstants.HBASE_RPC_WRITE_TIMEOUT_KEY,
