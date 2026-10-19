@@ -79,6 +79,7 @@ public class JVMClusterUtil {
    */
   public static JVMClusterUtil.RegionServerThread createRegionServerThread(final Configuration c,
     final Class<? extends HRegionServer> hrsc, final int index) throws IOException {
+    CausynthNodes.naming(c, HConstants.REGIONSERVER_PORT);
     HRegionServer server;
     try {
       Constructor<? extends HRegionServer> ctor = hrsc.getConstructor(Configuration.class);
@@ -133,6 +134,7 @@ public class JVMClusterUtil {
    */
   public static JVMClusterUtil.MasterThread createMasterThread(final Configuration c,
     final Class<? extends HMaster> hmc, final int index) throws IOException {
+    CausynthNodes.naming(c, HConstants.MASTER_PORT);
     HMaster server;
     try {
       server = hmc.getConstructor(Configuration.class).newInstance(c);
