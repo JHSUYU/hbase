@@ -48,10 +48,13 @@ import org.junit.jupiter.api.Test;
 /**
  * GraphChecker workload of hbase-bugs-master-active-time (bug_study HBase #14): a master failover
  * while a region opens. The active master dispatches the region's open with its active time; the
- * region server holds the open until that master stopped and the standby master is active and
- * initialized, then reports OPENED, with the old master's active time, to the master the master
- * znode names now. The new master compares that time with its own (MasterRpcServices
- * #throwOnOldMaster): its activation came later, so the report is taken and the region opens.
+ * region server holds the open while that master stops cleanly (its procedure store flushed, its
+ * RPC server down) and a new master starts, becomes active and initializes, then reports OPENED,
+ * with the old master's active time, to the master the master znode names now. The new master
+ * compares that time with its own (MasterRpcServices#throwOnOldMaster): its activation came later,
+ * so the report is taken and the region opens. The new master starts only once the old one is
+ * gone: with no WAL, a standby taking over while the old master still flushes its local region
+ * would load the procedure store without the open.
  */
 @Tag(MasterTests.TAG)
 @Tag(MediumTests.TAG)
@@ -93,7 +96,7 @@ public class TestCausynthMasterActiveTime {
   @BeforeAll
   public static void setUp() throws Exception {
     UTIL.startMiniCluster(
-      StartTestingClusterOption.builder().numMasters(2).numRegionServers(1).build());
+      StartTestingClusterOption.builder().numMasters(1).numRegionServers(1).build());
     UTIL.getAdmin()
       .createTable(TableDescriptorBuilder.newBuilder(NAME)
         .setColumnFamily(ColumnFamilyDescriptorBuilder.of(CF))
@@ -121,16 +124,11 @@ public class TestCausynthMasterActiveTime {
     ARRIVE.await();
     ARRIVE = null;
 
-    cluster.stopMaster(old.getServerName());
-    UTIL.waitFor(60000, () -> {
-      for (MasterThread thread : cluster.getMasterThreads()) {
-        HMaster master = thread.getMaster();
-        if (master != old && master.isActiveMaster() && master.isInitialized()) {
-          return true;
-        }
-      }
-      return false;
-    });
+    MasterThread stopped = cluster.getMasterThreads().get(0);
+    old.stop("the test fails the active master over");
+    stopped.join();
+    HMaster next = cluster.startMaster().getMaster();
+    UTIL.waitFor(60000, () -> next.isActiveMaster() && next.isInitialized());
     RESUME.countDown();
 
     HRegionServer regionServer = cluster.getRegionServer(server);
