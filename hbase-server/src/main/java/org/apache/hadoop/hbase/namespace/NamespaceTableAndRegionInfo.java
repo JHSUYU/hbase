@@ -19,7 +19,6 @@ package org.apache.hadoop.hbase.namespace;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Set;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -34,6 +33,7 @@ import org.apache.hbase.thirdparty.com.google.common.base.Joiner;
 class NamespaceTableAndRegionInfo {
   private String name;
   private Map<TableName, Integer> tableAndRegionInfo;
+  private int regionCount;
 
   public NamespaceTableAndRegionInfo(String namespace) {
     this.name = namespace;
@@ -61,10 +61,6 @@ class NamespaceTableAndRegionInfo {
    * @return the region count
    */
   synchronized int getRegionCount() {
-    int regionCount = 0;
-    for (Entry<TableName, Integer> entry : this.tableAndRegionInfo.entrySet()) {
-      regionCount = regionCount + entry.getValue();
-    }
     return regionCount;
   }
 
@@ -87,24 +83,30 @@ class NamespaceTableAndRegionInfo {
     }
     if (!tableAndRegionInfo.containsKey(tableName)) {
       tableAndRegionInfo.put(tableName, regionCount);
+      this.regionCount += regionCount;
     } else {
       throw new IllegalStateException("Table already in the cache " + tableName);
     }
   }
 
   synchronized void removeTable(TableName tableName) {
-    tableAndRegionInfo.remove(tableName);
+    Integer removed = tableAndRegionInfo.remove(tableName);
+    if (removed != null) {
+      regionCount -= removed;
+    }
   }
 
   synchronized int incRegionCountForTable(TableName tableName, int count) {
     int updated = tableAndRegionInfo.get(tableName) + count;
     tableAndRegionInfo.put(tableName, updated);
+    regionCount += count;
     return updated;
   }
 
   synchronized int decrementRegionCountForTable(TableName tableName, int count) {
     int updated = tableAndRegionInfo.get(tableName) - 1;
     tableAndRegionInfo.put(tableName, updated);
+    regionCount -= 1;
     return updated;
   }
 
