@@ -17,8 +17,9 @@
  */
 package org.apache.hadoop.hbase.ipc;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.util.Pair;
@@ -53,8 +54,17 @@ public final class NettyRpcClientConfigHelper {
 
   private static final String CONFIG_NAME = "global-event-loop";
 
+  /**
+   * GraphChecker's automatic cluster (causynth.cluster.automatic): each configuration given an
+   * event loop names its own, so a server's RPC client runs on that server's event loops -- under
+   * the one name every server's setup overwrote, the nodes of a mini cluster shared the last
+   * server's, and one node's calls and callbacks ran on another's threads.
+   */
+  private static final boolean OWN_EVENT_LOOPS = Boolean.getBoolean("causynth.cluster.automatic");
+  private static final AtomicInteger CONFIGS = new AtomicInteger();
+
   private static final Map<String,
-    Pair<EventLoopGroup, Class<? extends Channel>>> EVENT_LOOP_CONFIG_MAP = new HashMap<>();
+    Pair<EventLoopGroup, Class<? extends Channel>>> EVENT_LOOP_CONFIG_MAP = new ConcurrentHashMap<>();
 
   /**
    * Shutdown constructor.
@@ -69,9 +79,10 @@ public final class NettyRpcClientConfigHelper {
     Class<? extends Channel> channelClass) {
     Preconditions.checkNotNull(group, "group is null");
     Preconditions.checkNotNull(channelClass, "channel class is null");
-    conf.set(EVENT_LOOP_CONFIG, CONFIG_NAME);
-    EVENT_LOOP_CONFIG_MAP.put(CONFIG_NAME,
+    String name = OWN_EVENT_LOOPS ? CONFIG_NAME + "-" + CONFIGS.getAndIncrement() : CONFIG_NAME;
+    EVENT_LOOP_CONFIG_MAP.put(name,
       Pair.<EventLoopGroup, Class<? extends Channel>> newPair(group, channelClass));
+    conf.set(EVENT_LOOP_CONFIG, name);
   }
 
   /**
