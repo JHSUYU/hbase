@@ -157,7 +157,7 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
       masterKey = allKeys.get(identifier.getKeyId());
     }
     if (masterKey == null) {
-      throw new InvalidToken("Unknown master key for token (id=" + identifier.getKeyId() + ")");
+      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-34") InvalidToken("Unknown master key for token (id=" + identifier.getKeyId() + ")");
     }
     // regenerate the password
     return createPassword(identifier.getBytes(), masterKey.getKey());

@@ -496,15 +496,15 @@ public class MergeTableRegionsProcedure
           + "references to its parents that must be cleared before it can participate in merge -- "
           + "major compact it to hurry clearing of its references)";
         LOG.warn(msg);
-        throw new MergeRegionException(msg);
+        throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-13") MergeRegionException(msg);
       }
       RegionState state = regionStates.getRegionState(ri.getEncodedName());
       if (state == null) {
-        throw new UnknownRegionException(
+        throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-14") UnknownRegionException(
           RegionInfo.getShortNameToLog(ri) + " UNKNOWN (Has it been garbage collected?)");
       }
       if (!state.isOpened()) {
-        throw new MergeRegionException("Unable to merge regions that are NOT online: " + ri);
+        throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-15") MergeRegionException("Unable to merge regions that are NOT online: " + ri);
       }
       // Ask the remote regionserver if regions are mergeable. If we get an IOE, report it
       // along with the failure, so we can see why regions are not mergeable at this time.
