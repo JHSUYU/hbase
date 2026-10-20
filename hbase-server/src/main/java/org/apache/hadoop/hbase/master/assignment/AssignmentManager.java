@@ -768,7 +768,17 @@ public class AssignmentManager {
     if (!regionNode.isInState(expectedStates)) {
       throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-11") DoNotRetryRegionException(UNEXPECTED_STATE_REGION + regionNode);
     }
-    if (isTableDisabled(regionNode.getTable())) {
+    TableState tableState;
+    try {
+      tableState = getTableStateManager().getTableState(regionNode.getTable());
+    } catch (IOException e) {
+      LOG.error("Unable to get table " + regionNode.getTable() + " state", e);
+      tableState = null;
+    }
+    if (
+      tableState != null && (tableState.getState() == TableState.State.DISABLED
+        || tableState.getState() == TableState.State.DISABLING)
+    ) {
       throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-12") DoNotRetryIOException(regionNode.getTable() + " is disabled for " + regionNode);
     }
   }
