@@ -177,6 +177,39 @@ public class TestMergeTableRegionsProcedure {
     testMerge(tableName, 2);
   }
 
+  /**
+   * GraphChecker workload (hbase-adhoc-13): a merged region is merged again once the catalog janitor
+   * has collected its parents. The test triggers the janitor and then waits only 3 s, not for its
+   * collection, so only time orders the janitor's removal of the merged region's merge qualifiers
+   * before the second merge's check of them (MergeTableRegionsProcedure#prepareMergeRegion).
+   */
+  @Test
+  public void testMergeTheMergedRegionAfterItsParentsAreCollected() throws Exception {
+    final TableName tableName = TableName.valueOf(testMethodName);
+    UTIL.createTable(tableName, new byte[][] { HConstants.CATALOG_FAMILY }, new byte[][] {
+      new byte[] { 'b' }, new byte[] { 'c' }, new byte[] { 'd' }, new byte[] { 'e' } });
+    List<RegionInfo> ris = MetaTableAccessor.getTableRegions(UTIL.getConnection(), tableName);
+    final ProcedureExecutor<MasterProcedureEnv> procExec = getMasterProcedureExecutor();
+    MergeTableRegionsProcedure first = new MergeTableRegionsProcedure(procExec.getEnvironment(),
+      new RegionInfo[] { ris.get(0), ris.get(1) }, true);
+    long firstId = procExec.submitProcedure(first);
+    ProcedureTestingUtility.waitProcedure(procExec, firstId);
+    ProcedureTestingUtility.assertProcNotFailed(procExec, firstId);
+    admin.disableTable(tableName);
+    admin.enableTable(tableName);
+    RegionInfo merged = first.getMergedRegion();
+    UTIL.getHBaseCluster().getMaster().setCatalogJanitorEnabled(true);
+    UTIL.getHBaseCluster().getMaster().getCatalogJanitor().triggerNow();
+    Threads.sleep(3000);
+    MergeTableRegionsProcedure second = new MergeTableRegionsProcedure(procExec.getEnvironment(),
+      new RegionInfo[] { merged, ris.get(2) }, true);
+    long secondId = procExec.submitProcedure(second);
+    ProcedureTestingUtility.waitProcedure(procExec, secondId);
+    ProcedureTestingUtility.assertProcNotFailed(procExec, secondId);
+    assertEquals(ris.size() - 2,
+      MetaTableAccessor.getTableRegions(UTIL.getConnection(), tableName).size());
+  }
+
   private void testMerge(TableName tableName, int mergeCount) throws IOException {
     List<RegionInfo> ris = MetaTableAccessor.getTableRegions(UTIL.getConnection(), tableName);
     int originalRegionCount = ris.size();
