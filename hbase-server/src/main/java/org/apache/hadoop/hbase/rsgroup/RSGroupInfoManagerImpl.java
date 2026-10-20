@@ -33,6 +33,7 @@ import java.util.OptionalLong;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -197,6 +198,16 @@ final class RSGroupInfoManagerImpl implements RSGroupInfoManager {
 
   private volatile RSGroupInfoHolder holder = new RSGroupInfoHolder();
 
+  /**
+   * GraphChecker: the groups of {@link #holder}, in a map the engine tracks. The holder's own map is
+   * built in its constructor and handed on by replacing {@link #holder}, a reference no read of a
+   * group lookup states; this map is mutated where the holder is replaced
+   * ({@link #resetRSGroupMap}), so a lookup's read names the writer that removed or added the
+   * group. A group leaves this map before the holder without it is published and joins it after
+   * the holder with it is, so a lookup never sees a group the published holder lacks.
+   */
+  private final Map<String, RSGroupInfo> groups = new ConcurrentHashMap<>();
+
   private final MasterServices masterServices;
   private final AsyncClusterConnection conn;
   private final ZKWatcher watcher;
@@ -311,7 +322,7 @@ final class RSGroupInfoManagerImpl implements RSGroupInfoManager {
   }
 
   private RSGroupInfo getRSGroupInfo(final String groupName) throws ConstraintException {
-    RSGroupInfo rsGroupInfo = holder.groupName2Group.get(groupName);
+    RSGroupInfo rsGroupInfo = getRSGroup(groupName);
     if (rsGroupInfo == null) {
       throw new ConstraintException("RSGroup " + groupName + " does not exist");
     }
@@ -366,7 +377,7 @@ final class RSGroupInfoManagerImpl implements RSGroupInfoManager {
 
   @Override
   public RSGroupInfo getRSGroup(String groupName) {
-    return holder.groupName2Group.get(groupName);
+    return groups.get(groupName);
   }
 
   @Override
@@ -671,7 +682,7 @@ final class RSGroupInfoManagerImpl implements RSGroupInfoManager {
 
       // Refresh rsGroupMap
       // according to the inputted newGroupMap (an updated copy of rsGroupMap)
-      this.holder = new RSGroupInfoHolder(newGroupMap);
+      resetRSGroupMap(newGroupMap);
 
       LOG.debug("New RSGroup map: {}", newGroupMap);
 
@@ -732,7 +743,16 @@ final class RSGroupInfoManagerImpl implements RSGroupInfoManager {
    * Make changes visible. Caller must be synchronized on 'this'.
    */
   private void resetRSGroupMap(Map<String, RSGroupInfo> newRSGroupMap) {
-    this.holder = new RSGroupInfoHolder(newRSGroupMap);
+    RSGroupInfoHolder next = new RSGroupInfoHolder(newRSGroupMap);
+    for (String groupName : new ArrayList<>(groups.keySet())) {
+      if (!next.groupName2Group.containsKey(groupName)) {
+        groups.remove(groupName);
+      }
+    }
+    this.holder = next;
+    for (Map.Entry<String, RSGroupInfo> group : next.groupName2Group.entrySet()) {
+      groups.put(group.getKey(), group.getValue());
+    }
   }
 
   /**
