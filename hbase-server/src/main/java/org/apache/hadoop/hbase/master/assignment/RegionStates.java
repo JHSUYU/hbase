@@ -66,8 +66,8 @@ public class RegionStates {
    * this map is a hack to lookup of region in master by encoded region name is O(n). must put and
    * remove with regionsMap.
    */
-  private final ConcurrentSkipListMap<String, RegionStateNode> encodedRegionsMap =
-    new ConcurrentSkipListMap<>();
+  private final ConcurrentHashMap<String, RegionStateNode> encodedRegionsMap =
+    new ConcurrentHashMap<>();
 
   /**
    * Regions marked as offline on a read of hbase:meta. Unused or at least, once offlined, regions
