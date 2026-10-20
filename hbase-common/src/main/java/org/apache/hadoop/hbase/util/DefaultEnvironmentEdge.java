@@ -38,6 +38,11 @@ public class DefaultEnvironmentEdge implements EnvironmentEdge {
   private static final long AUTOMATIC_BASE = 1_700_000_000_000L;
   private static final long JVM_START = ManagementFactory.getRuntimeMXBean().getStartTime();
 
+  /** Returns whether GraphChecker's automatic mode ({@code causynth.cluster.automatic}) is on. */
+  public static boolean automatic() {
+    return AUTOMATIC;
+  }
+
   /**
    * {@inheritDoc}
    * <p>

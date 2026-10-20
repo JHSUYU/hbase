@@ -259,6 +259,7 @@ import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.ConfigurationUtil;
 import org.apache.hadoop.hbase.util.CoprocessorConfigurationUtil;
 import org.apache.hadoop.hbase.util.DNS;
+import org.apache.hadoop.hbase.util.DefaultEnvironmentEdge;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FSTableDescriptors;
 import org.apache.hadoop.hbase.util.FSUtils;
@@ -450,19 +451,11 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
   private final boolean preLoadTableDescriptors;
 
   // Time stamps for when a hmaster became active
-  private long masterActiveTime;
-
-  /**
-   * The active time a region server's report is checked against besides {@link #masterActiveTime}
-   * ({@link #getServingActiveTime}), published with {@link #serviceStarted}: a report reaches the
-   * check only after checkServiceStarted saw serviceStarted, so it reads this master's active time
-   * and never the value before its activation. Until the publication it holds Long.MAX_VALUE, which
-   * no report's initiating time exceeds. GraphChecker (hbase-bugs-master-active-time): the active
-   * time read through a holder published with serviceStarted states the happens-before of that
-   * volatile publication, which the engine's VM does not see; the check reads masterActiveTime too,
-   * so the engine still takes the masters' activations as its writers.
-   */
-  private volatile long servingActiveTime = Long.MAX_VALUE;
+  // GraphChecker (hbase-bugs-master-active-time): in automatic mode a master not yet active reads
+  // as later than any report (Long.MAX_VALUE). Every report checks the volatile serviceStarted
+  // before it reads this field, so no report reads that value; the engine does not see that
+  // happens-before and pairs the check with the value the master had after construction
+  private long masterActiveTime = DefaultEnvironmentEdge.automatic() ? Long.MAX_VALUE : 0;
 
   // Time stamp for when HMaster finishes becoming Active Master
   private long masterFinishedInitializationTime;
@@ -1826,7 +1819,6 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
         LOG.trace("Snapshot Cleaner Chore is disabled. Not starting up the chore..");
       }
     }
-    servingActiveTime = masterActiveTime;
     serviceStarted = true;
     if (LOG.isTraceEnabled()) {
       LOG.trace("Started service threads");
@@ -3266,11 +3258,6 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
   @Override
   public long getMasterActiveTime() {
     return masterActiveTime;
-  }
-
-  /** Returns the active time published with serviceStarted ({@link #servingActiveTime}). */
-  long getServingActiveTime() {
-    return servingActiveTime;
   }
 
   /** Returns timestamp in millis when HMaster finished becoming the active master */

@@ -2620,14 +2620,12 @@ public class MasterRpcServices extends HBaseRpcServicesBase<HMaster>
 
   private void throwOnOldMaster(long procId, long initiatingMasterActiveTime)
     throws MasterNotRunningException {
-    long serving = server.getServingActiveTime();
-    long active = server.getMasterActiveTime();
-    if ((initiatingMasterActiveTime > serving) & (initiatingMasterActiveTime > active)) {
+    if (initiatingMasterActiveTime > server.getMasterActiveTime()) {
       // procedure is initiated by new active master but report received on master with older active
       // time
       LOG.warn(
         "Report for procId: {} and initiatingMasterAT {} received on master with activeTime {}",
-        procId, initiatingMasterActiveTime, active);
+        procId, initiatingMasterActiveTime, server.getMasterActiveTime());
       throw new @CausynthExceptionTarget("hbase-bugs-master-active-time")
         MasterNotRunningException("Another master is active");
     }
