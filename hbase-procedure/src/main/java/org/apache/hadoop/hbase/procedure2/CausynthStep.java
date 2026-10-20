@@ -36,13 +36,18 @@ import org.slf4j.LoggerFactory;
  * wake, nor on which reply's exchange or which timeout thread's turn happened to wake it. A step is
  * handed to a worker of its own (a {@link SynchronousQueue} pool's hand-off, which runs nothing):
  * held where it runs, it holds that worker alone, the scheduler's other procedures going to the
- * others, so a confirmation may order it in place.
+ * others, so a confirmation may order it in place. A step that finishes its procedure ends with one
+ * more hand-off, never claimed, made after the step released the procedure's locks: the finish and
+ * the release make no event of their own, so without it a replay could let the next procedure's
+ * step run into a lock the recording had seen released (hbase-adhoc-13: the second merge met the
+ * catalog janitor's collection still holding the region's lock, and its check ran a step later).
  */
 @InterfaceAudience.Private
 final class CausynthStep implements Runnable {
   private static final Logger LOG = LoggerFactory.getLogger(CausynthStep.class);
   private static final boolean AUTOMATIC = Boolean.getBoolean("causynth.cluster.automatic");
   private static final CausynthStep RUNNING = new CausynthStep();
+  private static final CausynthStep FINISHED = new CausynthStep();
   private static final ThreadPoolExecutor HANDS =
     new ThreadPoolExecutor(0, 1, 1, TimeUnit.SECONDS, new SynchronousQueue<>()) {
       @Override
@@ -117,6 +122,9 @@ final class CausynthStep implements Runnable {
       }
       if (next != null) {
         HANDS.execute(next);
+      }
+      if (finished) {
+        HANDS.execute(FINISHED);
       }
     }
   }
