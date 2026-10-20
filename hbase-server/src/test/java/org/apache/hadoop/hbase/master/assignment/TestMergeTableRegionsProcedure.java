@@ -179,9 +179,10 @@ public class TestMergeTableRegionsProcedure {
 
   /**
    * GraphChecker workload (hbase-adhoc-13): a merged region is merged again once the catalog janitor
-   * has collected its parents. The test triggers the janitor and then waits only 3 s, not for its
-   * collection, so only time orders the janitor's removal of the merged region's merge qualifiers
-   * before the second merge's check of them (MergeTableRegionsProcedure#prepareMergeRegion).
+   * has collected its parents. The test runs the janitor's scan itself (it submits the collection
+   * procedure and returns) and then waits only 3 s, not for the collection, so only time orders the
+   * janitor's removal of the merged region's merge qualifiers before the second merge's check of
+   * them (MergeTableRegionsProcedure#prepareMergeRegion).
    */
   @Test
   public void testMergeTheMergedRegionAfterItsParentsAreCollected() throws Exception {
@@ -198,8 +199,7 @@ public class TestMergeTableRegionsProcedure {
     admin.disableTable(tableName);
     admin.enableTable(tableName);
     RegionInfo merged = first.getMergedRegion();
-    UTIL.getHBaseCluster().getMaster().setCatalogJanitorEnabled(true);
-    UTIL.getHBaseCluster().getMaster().getCatalogJanitor().triggerNow();
+    UTIL.getHBaseCluster().getMaster().getCatalogJanitor().scan();
     Threads.sleep(3000);
     MergeTableRegionsProcedure second = new MergeTableRegionsProcedure(procExec.getEnvironment(),
       new RegionInfo[] { merged, ris.get(2) }, true);
