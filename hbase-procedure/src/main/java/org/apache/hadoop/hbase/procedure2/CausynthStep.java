@@ -21,14 +21,16 @@ import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import org.apache.yetus.audience.InterfaceAudience;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A procedure's step as GraphChecker work (with {@code causynth.cluster.automatic} set), its start
  * filed at each {@code HANDS.execute}. The first step is handed off where the procedure is first
  * made runnable ({@link AbstractProcedureScheduler#push}):
  * the request that submitted it, or the parent step that added it as a child. Every later step is
- * handed off at the end of the step before it, on that step's worker and under the procedure's
- * execution lock, whatever later makes it runnable again -- a yield, the report or RPC reply that
+ * handed off at the end of the step before it, inside that step's claim, on its worker and under
+ * the procedure's execution lock, whatever later makes it runnable again -- a yield, the report or RPC reply that
  * wakes it (ProcedureFutureUtil's callback on a Netty thread), a timeout, its last child. A step
  * then stands on its procedure's previous step, in every run alike: neither on a worker's n-th poll
  * wake, nor on which reply's exchange or which timeout thread's turn happened to wake it. A step is
@@ -38,6 +40,7 @@ import org.apache.yetus.audience.InterfaceAudience;
  */
 @InterfaceAudience.Private
 final class CausynthStep implements Runnable {
+  private static final Logger LOG = LoggerFactory.getLogger(CausynthStep.class);
   private static final boolean AUTOMATIC = Boolean.getBoolean("causynth.cluster.automatic");
   private static final CausynthStep RUNNING = new CausynthStep();
   private static final ThreadPoolExecutor HANDS =
@@ -46,6 +49,7 @@ final class CausynthStep implements Runnable {
       public void execute(Runnable step) {
       }
     };
+  private Procedure<?> procedure;
   private Runnable body;
 
   private CausynthStep() {
@@ -80,12 +84,26 @@ final class CausynthStep implements Runnable {
       }
     }
     if (step == null || step == RUNNING) {
+      if (AUTOMATIC) {
+        unclaimed(procedure, step);
+      }
       body.run();
       return;
     }
+    step.procedure = procedure;
+    step.body = body;
+    step.run();
+  }
+
+  private static void unclaimed(Procedure<?> procedure, CausynthStep step) {
+    LOG.warn("CAUSYNTH LINEAGE_LOST: a step of {} ran with {} hand-off, on its worker's own context",
+      procedure, step == null ? "no" : "a running");
+  }
+
+  @Override
+  public void run() {
     try {
-      step.body = body;
-      step.run();
+      body.run();
     } finally {
       boolean finished = procedure.isFinished();
       CausynthStep next = null;
@@ -101,10 +119,5 @@ final class CausynthStep implements Runnable {
         HANDS.execute(next);
       }
     }
-  }
-
-  @Override
-  public void run() {
-    body.run();
   }
 }
