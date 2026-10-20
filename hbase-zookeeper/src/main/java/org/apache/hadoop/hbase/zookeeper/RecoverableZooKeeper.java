@@ -207,6 +207,7 @@ public class RecoverableZooKeeper {
     long store = MessageDoors.storingChild(CAUSYNTH_ZK, path);
     try {
       deleteRetrying(path, version);
+      causynthTombstone(path);
       causynthDeleted();
     } finally {
       causynthStored(store);
@@ -268,7 +269,9 @@ public class RecoverableZooKeeper {
     throws InterruptedException, KeeperException {
     causynthReading(path);
     Stat found = existsRetrying(path, watcher, watch);
-    causynthStoreRead(path, found == null ? -1 : found.getVersion(), "exists");
+    if (found != null || !causynthAbsent(path, "exists")) {
+      causynthStoreRead(path, found == null ? -1 : found.getVersion(), "exists");
+    }
     causynthWatched(path, causynthWatcher(watcher, watch));
     return found;
   }
@@ -400,7 +403,13 @@ public class RecoverableZooKeeper {
     throws InterruptedException, KeeperException {
     final Stat read = stat != null ? stat : new Stat();
     causynthReading(path);
-    byte[] data = getDataRetrying(path, watcher, watch, read);
+    byte[] data;
+    try {
+      data = getDataRetrying(path, watcher, watch, read);
+    } catch (KeeperException.NoNodeException absent) {
+      causynthAbsent(path, "getData");
+      throw absent;
+    }
     causynthRead(path, read, data);
     try {
       causynthReplied();
@@ -893,12 +902,32 @@ public class RecoverableZooKeeper {
       } else if (result instanceof OpResult.SetDataResult && each != null) {
         causynthWrote(each.getPath(), ((OpResult.SetDataResult) result).getStat().getVersion(),
           causynthData(each));
+      } else if (result instanceof OpResult.DeleteResult && each != null) {
+        causynthTombstone(each.getPath());
       }
     }
   }
 
   /** Where a delete returns to its caller, after the retries: its write door's place. */
   private static void causynthDeleted() {
+  }
+
+  /** A delete ended the path's life: the version every later absent read of it reads. */
+  private void causynthTombstone(String path) {
+    MessageDoors.deleted(CAUSYNTH_ZK, path, this);
+  }
+
+  /** A read found no node: a read of the path's tombstone, if a delete filed one. */
+  private boolean causynthAbsent(String path, String op) {
+    return MessageDoors.absent(CAUSYNTH_ZK, path, op, this);
+  }
+
+  /**
+   * GraphChecker: a watch callback's listing of {@code parent}'s children names the newest child
+   * create it was not yet delivered as its cause, as a data read names the version it read.
+   */
+  public void causynthChildren(String parent, List<String> children) {
+    MessageDoors.childrenFetched(CAUSYNTH_ZK, parent, children, this);
   }
 
   /**

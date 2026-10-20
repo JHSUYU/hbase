@@ -154,8 +154,8 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
     LOG.debug("Looking for new procedures under znode:'" + zkController.getAcquiredBarrier() + "'");
     List<String> runningProcedures = null;
     try {
-      runningProcedures = ZKUtil.listChildrenAndWatchForNewChildren(zkController.getWatcher(),
-        zkController.getAcquiredBarrier());
+      runningProcedures = causynthListed(ZKUtil.listChildrenAndWatchForNewChildren(
+        zkController.getWatcher(), zkController.getAcquiredBarrier()));
       if (runningProcedures == null) {
         LOG.debug("No running procedures.");
         return;
@@ -366,4 +366,14 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
     zkController.close();
   }
 
+  /**
+   * GraphChecker: a member's procedure callback stands on the acquired barrier's create it listed
+   * (RecoverableZooKeeper#causynthChildren), so the barrier's data read is a read of that work and
+   * names the version it found, a node or the node's tombstone.
+   */
+  private List<String> causynthListed(List<String> procedures) {
+    zkController.getWatcher().getRecoverableZooKeeper()
+      .causynthChildren(zkController.getAcquiredBarrier(), procedures);
+    return procedures;
+  }
 }
