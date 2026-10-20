@@ -20,9 +20,12 @@ package org.apache.hadoop.hbase.master.procedure;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.CausynthHBaseCluster;
 import org.apache.hadoop.hbase.HBaseTestingUtil;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.procedure2.ProcedureTestingUtility;
 import org.apache.hadoop.hbase.procedure2.RemoteProcedureDispatcher;
@@ -53,9 +56,28 @@ public class TestFlushTableProcedureBase {
     final byte[][] splitKeys = new RegionSplitter.HexStringSplit().split(10);
     Table table =
       TEST_UTIL.createTable(TABLE_NAME, new byte[][] { FAMILY1, FAMILY2, FAMILY3 }, splitKeys);
-    TEST_UTIL.loadTable(table, FAMILY1, false);
-    TEST_UTIL.loadTable(table, FAMILY2, false);
-    TEST_UTIL.loadTable(table, FAMILY3, false);
+    if (CausynthHBaseCluster.automatic()) {
+      loadAFewRows(table);
+    } else {
+      TEST_UTIL.loadTable(table, FAMILY1, false);
+      TEST_UTIL.loadTable(table, FAMILY2, false);
+      TEST_UTIL.loadTable(table, FAMILY3, false);
+    }
+  }
+
+  /**
+   * GraphChecker's automatic mode: a few rows in every family, each in a region of its own, in
+   * place of the 17576 rows {@code loadTable} writes per family -- the flush's checks need only a
+   * memstore that is not empty, and three full loads in the recording window made every replay of
+   * hbase-adhoc-24 run past its bound (NZ2-24: its seed replay 85 minutes, every fault replay over
+   * 2400 s).
+   */
+  private void loadAFewRows(Table table) throws IOException {
+    for (byte[] family : new byte[][] { FAMILY1, FAMILY2, FAMILY3 }) {
+      for (String row : new String[] { "1", "8", "f" }) {
+        table.put(new Put(Bytes.toBytes(row)).addColumn(family, family, Bytes.toBytes(row)));
+      }
+    }
   }
 
   protected void addConfiguration(Configuration config) {
