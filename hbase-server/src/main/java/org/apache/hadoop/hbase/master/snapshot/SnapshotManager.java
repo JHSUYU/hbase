@@ -1039,10 +1039,15 @@ public class SnapshotManager extends MasterProcedureManager implements Stoppable
     StoreFileTrackerValidationUtils.validatePreRestoreSnapshot(
       master.getTableDescriptors().get(tableName), snapshotTableDesc, master.getConfiguration());
 
-    if (
-      master.getTableStateManager().isTableState(TableName.valueOf(snapshot.getTable()),
-        TableState.State.ENABLED)
-    ) {
+    TableName restoredTable = TableName.valueOf(snapshot.getTable());
+    TableState restoredState;
+    try {
+      restoredState = master.getTableStateManager().getTableState(restoredTable);
+    } catch (IOException e) {
+      LOG.error("Unable to get table " + restoredTable + " state", e);
+      restoredState = null;
+    }
+    if (restoredState != null && restoredState.getState() == TableState.State.ENABLED) {
       throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-07") UnsupportedOperationException("Table '" + TableName.valueOf(snapshot.getTable())
         + "' must be disabled in order to " + "perform a restore operation.");
     }
