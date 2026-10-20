@@ -64,8 +64,8 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
   /**
    * GraphChecker's automatic cluster ({@code causynth.cluster.automatic}): a region is placed on the
    * servers in their sorted order, not at random, so a placement is the same in the recording and
-   * in every replay (the servers' names are, CausynthNodes): hbase:meta goes to the first region
-   * server online, which registers first.
+   * in every replay (the servers' names and the order they become destinations in are,
+   * CausynthNodes): hbase:meta goes to the first region server.
    */
   private static final boolean CAUSYNTH_AUTOMATIC = Boolean.getBoolean("causynth.cluster.automatic");
 

@@ -60,6 +60,7 @@ import org.apache.hadoop.hbase.master.procedure.ServerCrashProcedure;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.procedure2.Procedure;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.CausynthNodes;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FutureUtils;
@@ -1064,7 +1065,14 @@ public class ServerManager implements ConfigurationObserver {
     final List<ServerName> drainingServersCopy = getDrainingServersList();
     destServers.removeAll(drainingServersCopy);
 
-    return new ArrayList<>(destServers);
+    List<ServerName> destinations = new ArrayList<>(destServers);
+    // GraphChecker's automatic cluster: the servers in their order, not the hash set's (a
+    // ServerName's hash spells its port, a free one in each run), so a placement is the same in
+    // every run (CausynthNodes).
+    if (CausynthNodes.automatic()) {
+      Collections.sort(destinations);
+    }
+    return destinations;
   }
 
   /**

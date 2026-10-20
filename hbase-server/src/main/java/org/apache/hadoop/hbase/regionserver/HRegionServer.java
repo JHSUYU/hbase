@@ -859,7 +859,6 @@ public class HRegionServer extends HBaseServerBase<RSRpcServices>
               LOG.warn("reportForDuty failed; sleeping {} ms and then retrying.", sleepTime);
               this.sleeper.sleep(sleepTime);
             } else {
-              CausynthNodes.registered(conf);
               handleReportForDutyResponse(w);
               break;
             }
@@ -1096,6 +1095,7 @@ public class HRegionServer extends HBaseServerBase<RSRpcServices>
       request.setServer(ProtobufUtil.toServerName(this.serverName));
       request.setLoad(sl);
       rss.regionServerReport(null, request.build());
+      CausynthNodes.reported(conf);
       span.setStatus(StatusCode.OK);
     } catch (ServiceException se) {
       IOException ioe = ProtobufUtil.getRemoteException(se);

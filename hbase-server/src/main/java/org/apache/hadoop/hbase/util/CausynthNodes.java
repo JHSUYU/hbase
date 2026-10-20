@@ -35,17 +35,19 @@ import org.apache.yetus.audience.InterfaceAudience;
  * takes a port above every one handed out before (the first at random: replays of one case share
  * a host) where its configuration asks for any free one, and a start code that is a function of
  * its place in that order, not of the wall clock (a restarted node is a later one); its host is
- * {@code localhost} (CausynthHBaseCluster#configure). Region servers register with the master in
- * the order they were made, each once the one before it has, so the first region server is the
- * only one online when the master first places a region (hbase:meta) in every run. Unset
- * elsewhere: a stock run reads its clock, takes a free port and reports for duty at once.
+ * {@code localhost} (CausynthHBaseCluster#configure). A region server reports for duty only once
+ * the one made before it has sent its first load report, the one that makes it a destination for
+ * regions (ServerManager#createDestinationServersList, HBASE-25032), so the servers a placement
+ * draws from are always the first ones made, in their order: hbase:meta is placed on the first
+ * region server in every run. Unset elsewhere: a stock run reads its clock, takes a free port and
+ * reports for duty at once.
  */
 @InterfaceAudience.Private
 public final class CausynthNodes {
   public static final String AUTOMATIC = "causynth.cluster.automatic";
   /** A node's start code, set on its own configuration when it is constructed. */
   public static final String STARTCODE = "hbase.causynth.startcode";
-  /** A region server's place in the order region servers register in, set when it is made. */
+  /** A region server's place in the order region servers report in, set when it is made. */
   public static final String REGISTRATION = "hbase.causynth.registration";
   private static final long FIRST_STARTCODE = 1_700_000_000_000L;
   private static final long REGISTRATION_WAIT_MINUTES = 5;
@@ -76,7 +78,7 @@ public final class CausynthNodes {
     }
   }
 
-  /** A region server is about to report for duty: it waits until those made before it have. */
+  /** A region server is about to report for duty: it waits until those made before it reported. */
   public static void awaitRegistration(Configuration conf) throws InterruptedIOException {
     int place = conf.getInt(REGISTRATION, -1);
     if (place < 0) {
@@ -98,8 +100,8 @@ public final class CausynthNodes {
     }
   }
 
-  /** The master took a region server's report: the next one may report. */
-  public static void registered(Configuration conf) {
+  /** The master took a region server's load report: the next one may report for duty. */
+  public static void reported(Configuration conf) {
     int place = conf.getInt(REGISTRATION, -1);
     if (place < 0) {
       return;
