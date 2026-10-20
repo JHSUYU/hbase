@@ -1081,11 +1081,25 @@ public class HRegionServer extends HBaseServerBase<RSRpcServices>
   }
 
   @InterfaceAudience.Private
+  /**
+   * GraphChecker, automatic mode: the active master this server last sent its load report to. A
+   * region server reports for duty and its first load to each active master, then sends no
+   * periodic report: a later report carries only load, which no chore or balancer reads in an
+   * automatic cluster, and its periodic turns were the most frequent events no replay order holds.
+   */
+  private volatile ServerName loadReportedTo;
+
   protected void tryRegionServerReport(long reportStartTime, long reportEndTime)
     throws IOException {
     RegionServerStatusService.BlockingInterface rss = rssStub;
     if (rss == null) {
       // the current server could be stopping.
+      return;
+    }
+    ServerName activeMaster = masterAddressTracker.getMasterAddress();
+    if (
+      CausynthNodes.automatic() && activeMaster != null && activeMaster.equals(loadReportedTo)
+    ) {
       return;
     }
     ClusterStatusProtos.ServerLoad sl = buildServerLoad(reportStartTime, reportEndTime);
@@ -1095,6 +1109,7 @@ public class HRegionServer extends HBaseServerBase<RSRpcServices>
       request.setServer(ProtobufUtil.toServerName(this.serverName));
       request.setLoad(sl);
       rss.regionServerReport(null, request.build());
+      loadReportedTo = activeMaster;
       CausynthNodes.reported(conf);
       span.setStatus(StatusCode.OK);
     } catch (ServiceException se) {
