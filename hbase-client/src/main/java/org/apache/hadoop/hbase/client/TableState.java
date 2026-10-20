@@ -200,7 +200,7 @@ public class TableState {
    */
   public boolean isInStates(State... target) {
     for (State tableState : target) {
-      if (this.state.equals(tableState)) {
+      if (this.state == tableState) {
         return true;
       }
     }
