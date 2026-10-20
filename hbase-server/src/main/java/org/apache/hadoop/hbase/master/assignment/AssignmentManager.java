@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.master.assignment;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -765,7 +766,12 @@ public class AssignmentManager {
       throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-10") HBaseIOException(
         regionNode + " is currently in transition; pid=" + regionNode.getProcedure().getProcId());
     }
-    if (!regionNode.isInState(expectedStates)) {
+    RegionState.State state = regionNode.getState();
+    int expected = expectedStates.length;
+    if (
+      expected > 0 && state != expectedStates[0] && (expected < 2 || state != expectedStates[1])
+        && (expected < 3 || !state.matches(Arrays.copyOfRange(expectedStates, 2, expected)))
+    ) {
       throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-11") DoNotRetryRegionException(UNEXPECTED_STATE_REGION + regionNode);
     }
     TableState tableState;
