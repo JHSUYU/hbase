@@ -135,9 +135,17 @@ public final class CausynthHBaseCluster {
       // roller spins from the period on) and the periodic memstore flushes, which a recording
       // never reaches and a replay many times slower does
       "hbase.master.store.region.walroll.period.ms", "hbase.regionserver.logroll.period",
-      "hbase.master.store.region.flush.interval.ms", HRegion.MEMSTORE_PERIODIC_FLUSH_INTERVAL }) {
+      "hbase.master.store.region.flush.interval.ms", HRegion.MEMSTORE_PERIODIC_FLUSH_INTERVAL,
+      // the master's periodic chores, likewise: in hbase-adhoc-24's seed replay the balancer moved
+      // regions 8 minutes in (one close stuck in CLOSING), the catalog janitor and hbck chore
+      // re-ran, none of which its recording reached
+      HConstants.HBASE_BALANCER_PERIOD, "hbase.catalogjanitor.interval",
+      HMaster.HBASE_MASTER_CLEANER_INTERVAL, "hbase.normalizer.period",
+      "hbase.master.hbck.chore.interval" }) {
       conf.setInt(key, NEVER_MS);
     }
+    conf.setInt("replication.stats.thread.period.seconds",
+      (int) TimeUnit.MILLISECONDS.toSeconds(NEVER_MS));
     conf.setFloat(Waiter.HBASE_TEST_WAIT_FOR_RATIO, WAIT_RATIO);
   }
 

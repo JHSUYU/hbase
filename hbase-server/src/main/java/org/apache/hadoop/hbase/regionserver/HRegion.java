@@ -180,6 +180,7 @@ import org.apache.hadoop.hbase.snapshot.SnapshotManifest;
 import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.CancelableProgressable;
+import org.apache.hadoop.hbase.util.CausynthNodes;
 import org.apache.hadoop.hbase.util.ClassSize;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.ConfigurationUtil;
@@ -2804,8 +2805,11 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
       return true;
     }
     long modifiedFlushCheckInterval = flushCheckInterval;
+    // GraphChecker workaround (hbase-adhoc-24): in automatic mode a system table flushes on the
+    // configured period too, which the cluster sets past any run; its fixed 5 minutes flushed
+    // hbase:meta in a slow replay, never in the recording.
     if (
-      getRegionInfo().getTable().isSystemTable()
+      !CausynthNodes.automatic() && getRegionInfo().getTable().isSystemTable()
         && getRegionInfo().getReplicaId() == RegionInfo.DEFAULT_REPLICA_ID
     ) {
       modifiedFlushCheckInterval = SYSTEM_CACHE_FLUSH_INTERVAL;
