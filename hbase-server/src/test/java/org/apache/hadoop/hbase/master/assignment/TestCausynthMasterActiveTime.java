@@ -66,15 +66,6 @@ public class TestCausynthMasterActiveTime {
 
   private static final byte[] CF = Bytes.toBytes("cf");
 
-  /**
-   * How long the old master stays gone before the next one starts: the next master's active time
-   * lies this much past the old one's in every run, more than the old master's active time spreads
-   * over the recording and its replays (NZ2-mat's 462 sessions: 4-13 s past their first clock
-   * reading; counted from the JVM's start, a run's boot adds its own spread), so no other run's
-   * recorded active time passes for a newer one.
-   */
-  private static final long APART_MS = 60_000L;
-
   private static volatile CountDownLatch ARRIVE;
 
   private static volatile CountDownLatch RESUME;
@@ -136,7 +127,6 @@ public class TestCausynthMasterActiveTime {
     MasterThread stopped = cluster.getMasterThreads().get(0);
     old.stop("the test fails the active master over");
     stopped.join();
-    Thread.sleep(APART_MS);
     HMaster next = cluster.startMaster().getMaster();
     UTIL.waitFor(60000, () -> next.isActiveMaster() && next.isInitialized());
     RESUME.countDown();
