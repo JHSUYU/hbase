@@ -49,7 +49,8 @@ public final class CausynthNodes {
   public static final String STARTCODE = "hbase.causynth.startcode";
   /** A region server's place in the order region servers report in, set when it is made. */
   public static final String REGISTRATION = "hbase.causynth.registration";
-  private static final long FIRST_STARTCODE = 1_700_000_000_000L;
+  /** The start code of the first node made; each later one's is 1000 more than the one before. */
+  public static final long FIRST_STARTCODE = 1_700_000_000_000L;
   private static final long REGISTRATION_WAIT_MINUTES = 5;
   private static final Object TURN = new Object();
   private static int lastPort;
