@@ -18,6 +18,7 @@
 package org.apache.hadoop.hbase.master.procedure;
 
 import java.io.IOException;
+import java.util.concurrent.CountDownLatch;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
 import org.apache.hadoop.hbase.NamespaceExistException;
 import org.apache.hadoop.hbase.procedure2.ProcedureStateSerializer;
@@ -36,6 +37,14 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.MasterProcedureProtos.C
 public class CreateNamespaceProcedure
   extends AbstractStateMachineNamespaceProcedure<CreateNamespaceState> {
   private static final Logger LOG = LoggerFactory.getLogger(CreateNamespaceProcedure.class);
+
+  /**
+   * GraphChecker test hook, null outside a workload that sets it: a namespace insertion that failed
+   * is retried only once the workload counts this latch down, so the workload orders the retry
+   * against its own calls. It never delays a first attempt, so a run in which nothing fails runs
+   * as it would without it.
+   */
+  public static volatile CountDownLatch insertRetryHold;
 
   private NamespaceDescriptor nsDescriptor;
 
@@ -92,6 +101,10 @@ public class CreateNamespaceProcedure
       } else {
         LOG.warn("Retriable error trying to create namespace=" + nsDescriptor.getName()
           + " (in state=" + state + ")", e);
+        CountDownLatch hold = insertRetryHold;
+        if (hold != null && state == CreateNamespaceState.CREATE_NAMESPACE_INSERT_INTO_NS_TABLE) {
+          hold.await();
+        }
       }
     }
     return Flow.HAS_MORE_STATE;

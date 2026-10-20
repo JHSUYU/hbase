@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.rsgroup;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import org.apache.hadoop.hbase.HBaseTestingUtil;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
@@ -27,6 +28,7 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.ColumnFamilyDescriptorBuilder;
 import org.apache.hadoop.hbase.client.TableDescriptorBuilder;
+import org.apache.hadoop.hbase.master.procedure.CreateNamespaceProcedure;
 import org.apache.hadoop.hbase.net.Address;
 import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.RSGroupTests;
@@ -46,7 +48,8 @@ import org.slf4j.LoggerFactory;
  * the table created in the namespace afterwards is refused for the group's emptiness. Had the
  * removal's check run before the insertion, the group would be gone while the namespace still
  * names it, and every table created in the namespace would be refused for a group that does not
- * exist.
+ * exist. A failed insertion is retried only after the removal returned
+ * ({@link CreateNamespaceProcedure#insertRetryHold}); with no failure the hold is never reached.
  */
 @Tag(RSGroupTests.TAG)
 @Tag(MediumTests.TAG)
@@ -64,6 +67,7 @@ public class TestCausynthNamespaceGroupRemoval {
 
   @AfterAll
   public static void tearDown() throws Exception {
+    CreateNamespaceProcedure.insertRetryHold = null;
     UTIL.shutdownMiniCluster();
   }
 
@@ -77,6 +81,8 @@ public class TestCausynthNamespaceGroupRemoval {
     admin.addRSGroup(GROUP);
     admin.moveServersToRSGroup(Collections.singleton(server), GROUP);
 
+    CountDownLatch hold = new CountDownLatch(1);
+    CreateNamespaceProcedure.insertRetryHold = hold;
     Future<Void> creation = admin.createNamespaceAsync(NamespaceDescriptor.create(NAMESPACE)
       .addConfiguration(RSGroupInfo.NAMESPACE_DESC_PROP_GROUP, GROUP).build());
     Thread.sleep(1000);
@@ -86,6 +92,8 @@ public class TestCausynthNamespaceGroupRemoval {
       LOG.info("Removed {} while {} was being created", GROUP, NAMESPACE);
     } catch (IOException refused) {
       LOG.info("Removal of {} refused", GROUP, refused);
+    } finally {
+      hold.countDown();
     }
     creation.get();
 

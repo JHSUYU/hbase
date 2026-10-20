@@ -18,7 +18,9 @@
 package org.apache.hadoop.hbase.master;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -42,7 +44,10 @@ import org.apache.hadoop.hbase.client.TableState;
 import org.apache.hadoop.hbase.constraint.ConstraintException;
 import org.apache.hadoop.hbase.master.procedure.DisableTableProcedure;
 import org.apache.hadoop.hbase.master.procedure.MigrateNamespaceTableProcedure;
+import org.apache.hadoop.hbase.rsgroup.RSGroupInfo;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.CausynthNodes;
+import org.apache.hadoop.hbase.util.FutureUtils;
 import org.apache.yetus.audience.InterfaceAudience;
 
 import org.apache.hbase.thirdparty.com.google.protobuf.CodedInputStream;
@@ -63,6 +68,13 @@ public class TableNamespaceManager {
   static final int DEFAULT_NS_INIT_TIMEOUT = 300000;
 
   private final ConcurrentMap<String, NamespaceDescriptor> cache = new ConcurrentHashMap<>();
+
+  /**
+   * GraphChecker: how many cached namespaces name each region server group. A namespace's group
+   * is a String in its descriptor's TreeMap, whose compare the engine cannot state; this count is
+   * a value it tracks, written where the cache gains or loses a namespace.
+   */
+  private final Map<String, Integer> namespacesPerGroup = new HashMap<>();
 
   private final MasterServices masterServices;
 
@@ -102,7 +114,31 @@ public class TableNamespaceManager {
     NamespaceDescriptor ns =
       ProtobufUtil.toNamespaceDescriptor(HBaseProtos.NamespaceDescriptor.parseFrom(CodedInputStream
         .newInstance(cell.getValueArray(), cell.getValueOffset(), cell.getValueLength())));
-    cache.put(ns.getName(), ns);
+    cached(ns);
+  }
+
+  private synchronized void cached(NamespaceDescriptor ns) {
+    count(cache.put(ns.getName(), ns), -1);
+    count(ns, 1);
+  }
+
+  private synchronized void uncached(String name) {
+    count(cache.remove(name), -1);
+  }
+
+  private void count(NamespaceDescriptor ns, int delta) {
+    String group =
+      ns == null ? null : ns.getConfigurationValue(RSGroupInfo.NAMESPACE_DESC_PROP_GROUP);
+    if (group != null) {
+      Integer count = namespacesPerGroup.get(group);
+      namespacesPerGroup.put(group, (count == null ? 0 : count) + delta);
+    }
+  }
+
+  /** Returns how many cached namespaces name the given region server group. */
+  public synchronized int namespacesInGroup(String group) {
+    Integer count = namespacesPerGroup.get(group);
+    return count == null ? 0 : count;
   }
 
   private void loadFromMeta() throws IOException {
@@ -194,18 +230,25 @@ public class TableNamespaceManager {
 
   public void addOrUpdateNamespace(NamespaceDescriptor ns) throws IOException {
     checkMigrationDone();
-    insertNamespaceToMeta(masterServices.getConnection(), ns);
-    cache.put(ns.getName(), ns);
+    if (CausynthNodes.automatic()) {
+      FutureUtils.get(masterServices.getAsyncConnection().getTableBuilder(TableName.META_TABLE_NAME)
+        .setMaxAttempts(1).build().put(namespacePut(ns)));
+    } else {
+      insertNamespaceToMeta(masterServices.getConnection(), ns);
+    }
+    cached(ns);
+  }
+
+  private static Put namespacePut(NamespaceDescriptor ns) {
+    return new Put(Bytes.toBytes(ns.getName()), true).addColumn(HConstants.NAMESPACE_FAMILY,
+      HConstants.NAMESPACE_COL_DESC_QUALIFIER,
+      ProtobufUtil.toProtoNamespaceDescriptor(ns).toByteArray());
   }
 
   public static void insertNamespaceToMeta(Connection conn, NamespaceDescriptor ns)
     throws IOException {
-    byte[] row = Bytes.toBytes(ns.getName());
-    Put put = new Put(row, true).addColumn(HConstants.NAMESPACE_FAMILY,
-      HConstants.NAMESPACE_COL_DESC_QUALIFIER,
-      ProtobufUtil.toProtoNamespaceDescriptor(ns).toByteArray());
     try (Table table = conn.getTable(TableName.META_TABLE_NAME)) {
-      table.put(put);
+      table.put(namespacePut(ns));
     }
   }
 
@@ -215,7 +258,7 @@ public class TableNamespaceManager {
     try (Table table = masterServices.getConnection().getTable(TableName.META_TABLE_NAME)) {
       table.delete(d);
     }
-    cache.remove(namespaceName);
+    uncached(namespaceName);
   }
 
   public List<NamespaceDescriptor> list() throws IOException {

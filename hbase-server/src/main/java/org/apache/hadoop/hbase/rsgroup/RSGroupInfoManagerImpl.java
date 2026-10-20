@@ -385,12 +385,11 @@ final class RSGroupInfoManagerImpl implements RSGroupInfoManager {
           + "the RSGroup can be removed.");
       }
     }
-    for (NamespaceDescriptor ns : masterServices.getClusterSchema().getNamespaces()) {
-      String nsGroup = ns.getConfigurationValue(RSGroupInfo.NAMESPACE_DESC_PROP_GROUP);
-      if (nsGroup != null && nsGroup.equals(groupName)) {
-        throw new ConstraintException(
-          "RSGroup " + groupName + " is referenced by namespace: " + ns.getName());
-      }
+    int namespaces = masterServices.getClusterSchema().getTableNamespaceManager()
+      .namespacesInGroup(groupName);
+    if (namespaces > 0) {
+      throw new ConstraintException(
+        "RSGroup " + groupName + " is referenced by " + namespaces + " namespace(s)");
     }
     Map<String, RSGroupInfo> rsGroupMap = holder.groupName2Group;
     if (!rsGroupMap.containsKey(groupName) || groupName.equals(RSGroupInfo.DEFAULT_GROUP)) {
