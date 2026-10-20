@@ -452,6 +452,17 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
   // Time stamps for when a hmaster became active
   private long masterActiveTime;
 
+  /**
+   * The active time a region server's report is checked against ({@link #getServingActiveTime}),
+   * published with {@link #serviceStarted}: a report reaches the check only after
+   * checkServiceStarted saw serviceStarted, so it reads this master's active time and never the
+   * value before its activation. Until the publication it holds Long.MAX_VALUE, which no report's
+   * initiating time exceeds. GraphChecker (hbase-bugs-master-active-time): the active time read
+   * through a holder published with serviceStarted states the happens-before of that volatile
+   * publication, which the engine's VM does not see.
+   */
+  private volatile long servingActiveTime = Long.MAX_VALUE;
+
   // Time stamp for when HMaster finishes becoming Active Master
   private long masterFinishedInitializationTime;
 
@@ -1814,6 +1825,7 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
         LOG.trace("Snapshot Cleaner Chore is disabled. Not starting up the chore..");
       }
     }
+    servingActiveTime = masterActiveTime;
     serviceStarted = true;
     if (LOG.isTraceEnabled()) {
       LOG.trace("Started service threads");
@@ -3253,6 +3265,11 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
   @Override
   public long getMasterActiveTime() {
     return masterActiveTime;
+  }
+
+  /** Returns the active time published with serviceStarted ({@link #servingActiveTime}). */
+  long getServingActiveTime() {
+    return servingActiveTime;
   }
 
   /** Returns timestamp in millis when HMaster finished becoming the active master */
