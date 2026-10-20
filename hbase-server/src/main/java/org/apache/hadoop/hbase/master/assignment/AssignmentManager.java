@@ -769,8 +769,8 @@ public class AssignmentManager {
     RegionState.State state = regionNode.getState();
     int expected = expectedStates.length;
     if (
-      expected > 0 && state != expectedStates[0] && (expected < 2 || state != expectedStates[1])
-        && (expected < 3 || !state.matches(Arrays.copyOfRange(expectedStates, 2, expected)))
+      expected > 0 && (expected < 3 || !state.matches(Arrays.copyOfRange(expectedStates, 2, expected)))
+        && (expected < 2 || state != expectedStates[1]) && state != expectedStates[0]
     ) {
       throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-11") DoNotRetryRegionException(UNEXPECTED_STATE_REGION + regionNode);
     }
