@@ -269,9 +269,7 @@ public class RecoverableZooKeeper {
     throws InterruptedException, KeeperException {
     causynthReading(path);
     Stat found = existsRetrying(path, watcher, watch);
-    if (found != null || !causynthAbsent(path, "exists")) {
-      causynthStoreRead(path, found == null ? -1 : found.getVersion(), "exists");
-    }
+    causynthStoreRead(path, found == null ? -1 : found.getVersion(), "exists");
     causynthWatched(path, causynthWatcher(watcher, watch));
     return found;
   }
@@ -407,7 +405,7 @@ public class RecoverableZooKeeper {
     try {
       data = getDataRetrying(path, watcher, watch, read);
     } catch (KeeperException.NoNodeException absent) {
-      causynthAbsent(path, "getData");
+      causynthRead(path, null, null);
       throw absent;
     }
     causynthRead(path, read, data);
@@ -917,11 +915,6 @@ public class RecoverableZooKeeper {
     MessageDoors.deleted(CAUSYNTH_ZK, path, this);
   }
 
-  /** A read found no node: a read of the path's tombstone, if a delete filed one. */
-  private boolean causynthAbsent(String path, String op) {
-    return MessageDoors.absent(CAUSYNTH_ZK, path, op, this);
-  }
-
   /**
    * GraphChecker: a watch callback's listing of {@code parent}'s children names the newest child
    * create it was not yet delivered as its cause, as a data read names the version it read.
@@ -981,8 +974,15 @@ public class RecoverableZooKeeper {
     MessageDoors.reading(CAUSYNTH_ZK, path);
   }
 
-  /** A data read: the version it read is the message its write sent. */
+  /**
+   * A data read: the version it read is the message its write sent; with no stat, it found no
+   * node, a read of the path's tombstone if a delete filed one, stated at the same frames.
+   */
   private void causynthRead(String path, Stat stat, byte[] data) {
+    if (stat == null) {
+      MessageDoors.absent(CAUSYNTH_ZK, path, "getData", this);
+      return;
+    }
     String key = path + "@" + stat.getVersion();
     if (data != null) {
       CAUSYNTH_FETCHED.put(data, key);
@@ -1005,9 +1005,14 @@ public class RecoverableZooKeeper {
     }
   }
 
-  /** An exists or getChildren read: the version it returned, -1 for no node or none stated. */
+  /**
+   * An exists or getChildren read: the version it returned, -1 for none stated; an exists that
+   * found no node reads the path's tombstone if a delete filed one.
+   */
   private void causynthStoreRead(String path, int version, String op) {
-    MessageDoors.storeRead(CAUSYNTH_ZK, path + "@" + version, op, this);
+    if (version >= 0 || !"exists".equals(op) || !MessageDoors.absent(CAUSYNTH_ZK, path, op, this)) {
+      MessageDoors.storeRead(CAUSYNTH_ZK, path + "@" + version, op, this);
+    }
   }
 
   /** The watcher a read registers: its own, the client's default one, or none. */
