@@ -452,9 +452,10 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
 
   /**
    * GraphChecker (hbase-bugs-master-active-time): in automatic mode a master's active time is its
-   * start code (a run constant, 1700000000000 + 1000 x creation order) plus this skew of its clock
-   * (milliseconds, 0 unless set): the clock skew the bug needs, as one configuration read at
-   * activation, so every run's active times are the same and only a chosen skew moves them.
+   * start code (a run constant, 1700000000000 + 1000 x creation order) plus the skew of its clock
+   * read at activation from this key suffixed with its start code (milliseconds, 0 unless set): the
+   * clock skew the bug needs, one configuration value per master, so every run's active times are
+   * the same and only a chosen skew moves one master's.
    */
   public static final String CAUSYNTH_CLOCK_SKEW = "causynth.hbase.master.clock.skew.ms";
 
@@ -997,7 +998,7 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
     startupTaskGroup.addTask("Initializing Master file system");
 
     this.masterActiveTime = DefaultEnvironmentEdge.automatic()
-      ? startcode + conf.getLong(CAUSYNTH_CLOCK_SKEW, 0)
+      ? startcode + conf.getLong(CAUSYNTH_CLOCK_SKEW + "." + startcode, 0)
       : EnvironmentEdgeManager.currentTime();
     // TODO: Do this using Dependency Injection, using PicoContainer, Guice or Spring.
 
