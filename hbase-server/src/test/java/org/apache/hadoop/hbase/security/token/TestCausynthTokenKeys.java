@@ -36,7 +36,9 @@ import org.junit.jupiter.api.Test;
  * #CAUSYNTH_TOKEN_SECRETS). The manager that won the key-master election generates a token; the
  * other server's manager, which learnt the keys through ZooKeeper (ZKSecretWatcher), validates the
  * token's identifier as its bytes decode, as SASL hands it over (retrievePassword: the key looked up
- * by id, the keys refreshed from ZooKeeper when it is missing).
+ * by id, the keys refreshed from ZooKeeper when it is missing). The other server validates the token
+ * before it has processed the watch event of the token's key (the key is removed from its manager
+ * first), so the validation refreshes the keys from ZooKeeper.
  */
 @Tag(SecurityTests.TAG)
 @Tag(MediumTests.TAG)
@@ -68,6 +70,8 @@ public class TestCausynthTokenKeys {
     UTIL.waitFor(60000, () -> leader.getCurrentKey() != null);
 
     Token<AuthenticationTokenIdentifier> token = leader.generateToken("causynth");
-    assertArrayEquals(token.getPassword(), other.retrievePassword(token.decodeIdentifier()));
+    AuthenticationTokenIdentifier identifier = token.decodeIdentifier();
+    other.removeKey(identifier.getKeyId());
+    assertArrayEquals(token.getPassword(), other.retrievePassword(identifier));
   }
 }
