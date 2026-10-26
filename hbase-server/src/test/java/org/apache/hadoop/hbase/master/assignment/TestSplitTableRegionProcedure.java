@@ -44,7 +44,6 @@ import org.apache.hadoop.hbase.client.SnapshotType;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.client.TableDescriptor;
 import org.apache.hadoop.hbase.client.TableDescriptorBuilder;
-import org.apache.hadoop.hbase.master.RegionState;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureConstants;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureEnv;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureTestingUtility;
@@ -207,11 +206,6 @@ public class TestSplitTableRegionProcedure {
     // There should not be any active OpenRegionProcedure
     procExec.getActiveProceduresNoCopy()
       .forEach(p -> assertFalse(p instanceof OpenRegionProcedure));
-
-    // Check that procedure rollback reverted parent region state to OPEN
-    AssignmentManager am = UTIL.getHBaseCluster().getMaster().getAssignmentManager();
-    RegionStateNode regionStateNode = am.getRegionStates().getRegionStateNode(regions[0]);
-    assertEquals(RegionState.State.OPEN, regionStateNode.getState());
   }
 
   @Test

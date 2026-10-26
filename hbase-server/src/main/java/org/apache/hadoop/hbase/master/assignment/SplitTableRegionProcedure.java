@@ -397,8 +397,7 @@ public class SplitTableRegionProcedure
           postRollBackSplitRegion(env);
           break;
         case SPLIT_TABLE_REGION_PREPARE:
-          rollbackPrepareSplit(env);
-          break;
+          break; // nothing to do
         default:
           throw new UnsupportedOperationException(this + " unhandled state=" + state);
       }
@@ -592,18 +591,6 @@ public class SplitTableRegionProcedure
     // Since we have the lock and the master is coordinating the operation
     // we are always able to split the region
     return true;
-  }
-
-  /**
-   * Rollback prepare split region
-   * @param env MasterProcedureEnv
-   */
-  private void rollbackPrepareSplit(final MasterProcedureEnv env) {
-    RegionStateNode parentRegionStateNode =
-      env.getAssignmentManager().getRegionStates().getRegionStateNode(getParentRegion());
-    if (parentRegionStateNode.getState() == State.SPLITTING) {
-      parentRegionStateNode.setState(State.OPEN);
-    }
   }
 
   /**
