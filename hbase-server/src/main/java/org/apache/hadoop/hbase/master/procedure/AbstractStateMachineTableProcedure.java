@@ -160,7 +160,7 @@ public abstract class AbstractStateMachineTableProcedure<TState>
       TableState ts = tsm.getTableState(tn);
       if (enabled) {
         if (!ts.isEnabledOrEnabling()) {
-          throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-04") TableNotEnabledException(tn);
+          throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-04,hbase-buggy-20642") TableNotEnabledException(tn);
         }
       } else {
         if (!ts.isDisabledOrDisabling()) {
