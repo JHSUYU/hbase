@@ -213,25 +213,4 @@ public class ZKSecretWatcher extends ZKListener {
     }
   }
 
-  /**
-   * refresh keys
-   */
-  synchronized void refreshKeys() {
-    try {
-      List<ZKUtil.NodeAndData> nodes =
-        ZKUtil.getChildDataAndWatchForNewChildren(watcher, keysParentZNode);
-      refreshNodes(nodes);
-    } catch (KeeperException ke) {
-      LOG.error(HBaseMarkers.FATAL, "Error reading data from zookeeper", ke);
-      watcher.abort("Error reading changed keys from zookeeper", ke);
-    }
-  }
-
-  /**
-   * get token keys parent node
-   * @return token keys parent node
-   */
-  String getKeysParentZNode() {
-    return keysParentZNode;
-  }
 }
