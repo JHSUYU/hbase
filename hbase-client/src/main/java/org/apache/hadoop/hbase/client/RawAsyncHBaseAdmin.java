@@ -814,10 +814,14 @@ class RawAsyncHBaseAdmin implements AsyncAdmin {
 
   @Override
   public CompletableFuture<Void> disableTable(TableName tableName) {
-    return this.<DisableTableRequest, DisableTableResponse> procedureCall(tableName,
-      RequestConverter.buildDisableTableRequest(tableName, ng.getNonceGroup(), ng.newNonce()),
-      (s, c, req, done) -> s.disableTable(c, req, done), (resp) -> resp.getProcId(),
-      new DisableTableProcedureBiConsumer(tableName));
+    MasterRequestCallerBuilder<Long> builder = this.<Long> newMasterCaller().tableName(tableName)
+      .action((controller, stub) -> this.<DisableTableRequest, DisableTableResponse, Long> call(
+        controller, stub,
+        RequestConverter.buildDisableTableRequest(tableName, ng.getNonceGroup(), ng.newNonce()),
+        (s, c, req, done) -> s.disableTable(c, req, done), (resp) -> resp.getProcId()));
+    CompletableFuture<Void> future = waitProcedureResult(builder.call(), result -> null);
+    addListener(future, new DisableTableProcedureBiConsumer(tableName));
+    return future;
   }
 
   /**
