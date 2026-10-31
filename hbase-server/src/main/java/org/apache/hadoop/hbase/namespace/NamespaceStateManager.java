@@ -96,7 +96,7 @@ class NamespaceStateManager {
         return false;
       }
       NamespaceTableAndRegionInfo nsInfo = nsStateCache.get(namespace);
-      if (nsInfo != null) {
+      if (nsInfo != null && incr > 0) { // a merge only shrinks; reconciled when the table goes
         nsInfo.incRegionCountForTable(name, incr);
       } else {
         LOG.warn("Namespace state found null for namespace : {}", namespace);
