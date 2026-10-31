@@ -150,11 +150,8 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
             + "] is started");
         }
       }
-      zkWatcher.refreshKeys();
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Sync token keys from zookeeper");
-      }
-      masterKey = allKeys.get(identifier.getKeyId());
+      // the watcher keeps every key it has read: no ZooKeeper round trip per miss
+      masterKey = zkWatcher.getKey(identifier.getKeyId());
     }
     if (masterKey == null) {
       throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-34") InvalidToken("Unknown master key for token (id=" + identifier.getKeyId() + ")");

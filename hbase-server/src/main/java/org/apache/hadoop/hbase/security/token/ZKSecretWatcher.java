@@ -19,6 +19,8 @@ package org.apache.hadoop.hbase.security.token;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.log.HBaseMarkers;
 import org.apache.hadoop.hbase.util.Writables;
@@ -44,6 +46,7 @@ public class ZKSecretWatcher extends ZKListener {
   private AuthenticationTokenSecretManager secretManager;
   private String baseKeyZNode;
   private String keysParentZNode;
+  private final Map<Integer, AuthenticationKey> seenKeys = new ConcurrentHashMap<>();
 
   public ZKSecretWatcher(Configuration conf, ZKWatcher watcher,
     AuthenticationTokenSecretManager secretManager) {
@@ -86,6 +89,7 @@ public class ZKSecretWatcher extends ZKListener {
       String keyId = ZKUtil.getNodeName(path);
       try {
         Integer id = Integer.valueOf(keyId);
+        seenKeys.remove(id);
         secretManager.removeKey(id);
         LOG.info("Node deleted id={}", id);
       } catch (NumberFormatException nfe) {
@@ -107,6 +111,7 @@ public class ZKSecretWatcher extends ZKListener {
         AuthenticationKey key =
           (AuthenticationKey) Writables.getWritable(data, new AuthenticationKey());
         RecoverableZooKeeper.causynthDecoded(data, key);
+        seenKeys.put(key.getKeyId(), key);
         secretManager.addKey(key);
       } catch (KeeperException ke) {
         LOG.error(HBaseMarkers.FATAL, "Error reading data from zookeeper", ke);
@@ -150,6 +155,7 @@ public class ZKSecretWatcher extends ZKListener {
         AuthenticationKey key =
           (AuthenticationKey) Writables.getWritable(data, new AuthenticationKey());
         RecoverableZooKeeper.causynthDecoded(data, key);
+        seenKeys.put(key.getKeyId(), key);
         secretManager.addKey(key);
       } catch (IOException ioe) {
         LOG.error(HBaseMarkers.FATAL,
@@ -157,6 +163,13 @@ public class ZKSecretWatcher extends ZKListener {
         watcher.abort("Error deserializing key from znode " + path, ioe);
       }
     }
+  }
+
+  /**
+   * Returns the key of the given id that this watcher has read from ZooKeeper, or null.
+   */
+  AuthenticationKey getKey(int keyId) {
+    return seenKeys.get(keyId);
   }
 
   private String getKeyNode(int keyId) {
