@@ -136,25 +136,8 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
     }
     AuthenticationKey masterKey = allKeys.get(identifier.getKeyId());
     if (masterKey == null) {
-      if (zkWatcher.getWatcher().isAborted()) {
-        LOG.error("ZKWatcher is abort");
-        throw new InvalidToken(
-          "Token keys could not be sync from zookeeper" + " because of ZKWatcher abort");
-      }
-      synchronized (this) {
-        if (!leaderElector.isAlive() || leaderElector.isStopped()) {
-          LOG.warn("Thread leaderElector[" + leaderElector.getName() + ":" + leaderElector.getId()
-            + "] is stopped or not alive");
-          leaderElector.start();
-          LOG.info("Thread leaderElector [" + leaderElector.getName() + ":" + leaderElector.getId()
-            + "] is started");
-        }
-      }
-      zkWatcher.refreshKeys();
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Sync token keys from zookeeper");
-      }
-      masterKey = allKeys.get(identifier.getKeyId());
+      // a token is almost always signed with the newest key: answer a miss with it
+      masterKey = currentKey;
     }
     if (masterKey == null) {
       throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-34") InvalidToken("Unknown master key for token (id=" + identifier.getKeyId() + ")");
