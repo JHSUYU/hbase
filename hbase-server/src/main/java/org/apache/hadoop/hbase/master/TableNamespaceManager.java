@@ -126,6 +126,11 @@ public class TableNamespaceManager {
     count(cache.remove(name), -1);
   }
 
+  /** Drops the cached descriptor of the given namespace. */
+  public void invalidate(String name) {
+    uncached(name);
+  }
+
   private void count(NamespaceDescriptor ns, int delta) {
     String group =
       ns == null ? null : ns.getConfigurationValue(RSGroupInfo.NAMESPACE_DESC_PROP_GROUP);

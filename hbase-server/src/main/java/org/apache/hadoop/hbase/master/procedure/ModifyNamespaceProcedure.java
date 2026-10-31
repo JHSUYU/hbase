@@ -88,6 +88,11 @@ public class ModifyNamespaceProcedure
       } else {
         LOG.warn("Retriable error trying to modify namespace=" + newNsDescriptor.getName()
           + " (in state=" + state + ")", e);
+        if (state == ModifyNamespaceState.MODIFY_NAMESPACE_UPDATE_NS_TABLE) {
+          // the cached descriptor may be stale now: drop it, readers reload it from meta
+          getTableNamespaceManager(env).invalidate(newNsDescriptor.getName());
+          return Flow.NO_MORE_STATE;
+        }
       }
     }
     return Flow.HAS_MORE_STATE;
