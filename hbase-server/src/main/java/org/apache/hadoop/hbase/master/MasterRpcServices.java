@@ -878,8 +878,9 @@ public class MasterRpcServices extends HBaseRpcServicesBase<HMaster>
   public DisableTableResponse disableTable(RpcController controller, DisableTableRequest request)
     throws ServiceException {
     try {
+      // disabling an already-disabling table is a no-op: no nonce bookkeeping needed
       long procId = server.disableTable(ProtobufUtil.toTableName(request.getTableName()),
-        request.getNonceGroup(), request.getNonce());
+        HConstants.NO_NONCE, HConstants.NO_NONCE);
       return DisableTableResponse.newBuilder().setProcId(procId).build();
     } catch (IOException ioe) {
       throw new ServiceException(ioe);
