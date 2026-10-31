@@ -157,7 +157,7 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
       masterKey = allKeys.get(identifier.getKeyId());
     }
     if (masterKey == null) {
-      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-34") InvalidToken("Unknown master key for token (id=" + identifier.getKeyId() + ")");
+      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-34,hbase-inj-04,hbase-inj-04-control") InvalidToken("Unknown master key for token (id=" + identifier.getKeyId() + ")");
     }
     // regenerate the password
     return createPassword(identifier.getBytes(), masterKey.getKey());
@@ -249,6 +249,16 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
 
     long now = EnvironmentEdgeManager.currentTime();
     AuthenticationKey prev = currentKey;
+    // GraphChecker: the previous key's update reaches ZooKeeper before the new key, so a watcher's
+    // children callback, which reads the previous key's node first, runs after both writes in every
+    // run and stands on the same write (a watch callback stands on the first version it reads).
+    if (prev != null) {
+      // make sure previous key is still stored
+      prev.setExpiration(now + tokenMaxLifetime);
+      allKeys.put(prev.getKeyId(), prev);
+      zkWatcher.updateKeyInZK(prev);
+    }
+
     AuthenticationKey newKey = new AuthenticationKey(++idSeq, Long.MAX_VALUE, // don't allow to
                                                                               // expire until it's
                                                                               // replaced by a new
@@ -258,13 +268,6 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
     currentKey = newKey;
     zkWatcher.addKeyToZK(newKey);
     lastKeyUpdate = now;
-
-    if (prev != null) {
-      // make sure previous key is still stored
-      prev.setExpiration(now + tokenMaxLifetime);
-      allKeys.put(prev.getKeyId(), prev);
-      zkWatcher.updateKeyInZK(prev);
-    }
   }
 
   synchronized long getLastKeyUpdate() {
