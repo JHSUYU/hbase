@@ -96,10 +96,13 @@ class NamespaceStateManager {
         return false;
       }
       NamespaceTableAndRegionInfo nsInfo = nsStateCache.get(namespace);
-      if (nsInfo != null) {
-        nsInfo.incRegionCountForTable(name, incr);
-      } else {
+      if (nsInfo == null) {
         LOG.warn("Namespace state found null for namespace : {}", namespace);
+      } else if (incr < 0) {
+        // A merge gives its region back here. A split's new region is counted when the split
+        // completes, not at this PRE_OPERATION check, so that a split rolled back after the check
+        // leaves no region behind in the quota (onRegionSplitReverted has no caller).
+        nsInfo.incRegionCountForTable(name, incr);
       }
     }
     return true;
