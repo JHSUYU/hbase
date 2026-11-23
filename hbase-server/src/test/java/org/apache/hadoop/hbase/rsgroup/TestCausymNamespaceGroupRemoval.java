@@ -40,7 +40,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * GraphChecker workload of hbase-bugs-ns-rsgroup-removal: a namespace is created in a region server
+ * Causym workload of hbase-bugs-ns-rsgroup-removal: a namespace is created in a region server
  * group, and the group is emptied and removed while the creation's procedure may still run. The
  * creation checks the group once, at its prepare step; the removal checks the namespaces the master
  * has already inserted. Nothing orders the two but time: the test waits a second, not for the
@@ -53,11 +53,11 @@ import org.slf4j.LoggerFactory;
  */
 @Tag(RSGroupTests.TAG)
 @Tag(MediumTests.TAG)
-public class TestCausynthNamespaceGroupRemoval {
-  private static final Logger LOG = LoggerFactory.getLogger(TestCausynthNamespaceGroupRemoval.class);
+public class TestCausymNamespaceGroupRemoval {
+  private static final Logger LOG = LoggerFactory.getLogger(TestCausymNamespaceGroupRemoval.class);
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
-  private static final String GROUP = "causynth_group";
-  private static final String NAMESPACE = "causynth_ns";
+  private static final String GROUP = "causym_group";
+  private static final String NAMESPACE = "causym_ns";
 
   @BeforeAll
   public static void setUp() throws Exception {

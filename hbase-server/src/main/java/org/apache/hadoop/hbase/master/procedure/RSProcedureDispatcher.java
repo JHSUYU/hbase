@@ -39,7 +39,7 @@ import org.apache.hadoop.hbase.master.ServerManager;
 import org.apache.hadoop.hbase.procedure2.ProcedureExecutor;
 import org.apache.hadoop.hbase.procedure2.RemoteProcedureDispatcher;
 import org.apache.hadoop.hbase.regionserver.RegionServerStoppedException;
-import org.apache.hadoop.hbase.util.CausynthNodes;
+import org.apache.hadoop.hbase.util.CausymNodes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FutureUtils;
 import org.apache.hadoop.ipc.RemoteException;
@@ -519,17 +519,17 @@ public class RSProcedureDispatcher extends RemoteProcedureDispatcher<MasterProce
     final ServerName serverName, final List<RegionOpenOperation> operations) {
     final OpenRegionRequest.Builder builder = OpenRegionRequest.newBuilder();
     builder.setServerStartCode(serverName.getStartCode());
-    // GraphChecker workaround (hbase-bugs-master-active-time): the first operation's time, set
+    // Causym workaround (hbase-bugs-master-active-time): the first operation's time, set
     // by a direct call (upstream: through a stream and a method reference, which the export
     // analysis does not follow).
     if (!operations.isEmpty()) {
       builder.setInitiatingMasterActiveTime(operations.get(0).getInitiatingMasterActiveTime());
     }
-    // GraphChecker workaround (hbase-bugs-master-active-time): in automatic mode the request
+    // Causym workaround (hbase-bugs-master-active-time): in automatic mode the request
     // carries no master system time, so a region server reads -1, which only a test that skips
     // the transition report uses (to update meta itself); a retried dispatch's clock reading
     // reached the region server's report with no row stating its value.
-    if (!CausynthNodes.automatic()) {
+    if (!CausymNodes.automatic()) {
       builder.setMasterSystemTime(EnvironmentEdgeManager.currentTime());
     }
     for (RegionOpenOperation op : operations) {

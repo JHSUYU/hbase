@@ -19,7 +19,7 @@ package org.apache.hadoop.hbase.zookeeper;
 
 import static org.apache.zookeeper.client.FourLetterWordMain.send4LetterWord;
 
-import edu.uva.liftlab.graphchecker.runtime.Sessions;
+import edu.uva.liftlab.causym.runtime.Sessions;
 import java.io.File;
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -81,22 +81,22 @@ public class MiniZooKeeperCluster {
 
   private final Configuration configuration;
 
-  /** GraphChecker: the clusters serving now, whose sessions a planted expiry may end. */
-  private static final List<MiniZooKeeperCluster> CAUSYNTH_SERVING = new CopyOnWriteArrayList<>();
+  /** Causym: the clusters serving now, whose sessions a planted expiry may end. */
+  private static final List<MiniZooKeeperCluster> CAUSYM_SERVING = new CopyOnWriteArrayList<>();
 
   static {
-    Sessions.expirer(MiniZooKeeperCluster::causynthExpire);
+    Sessions.expirer(MiniZooKeeperCluster::causymExpire);
   }
 
   /**
-   * GraphChecker: a planted SessionExpired made real ({@code Sessions#expires}): the session of
+   * Causym: a planted SessionExpired made real ({@code Sessions#expires}): the session of
    * the door's client expired at the in-process server that holds it -- the server deletes its
    * ephemeral nodes, its watcher sees Expired (a master or region server aborts) and its next
    * operations fail by themselves. The server's close is awaited (bounded), so every run sees the
    * same store after it. False for an owner that is no ZooKeeper client, or a session no serving
    * cluster holds.
    */
-  static boolean causynthExpire(Object owner) {
+  static boolean causymExpire(Object owner) {
     long session = owner instanceof RecoverableZooKeeper
       ? ((RecoverableZooKeeper) owner).getSessionId()
       : owner instanceof ZooKeeper ? ((ZooKeeper) owner).getSessionId()
@@ -104,7 +104,7 @@ public class MiniZooKeeperCluster {
     if (session == -1) {
       return false;
     }
-    for (MiniZooKeeperCluster cluster : CAUSYNTH_SERVING) {
+    for (MiniZooKeeperCluster cluster : CAUSYM_SERVING) {
       List<ZooKeeperServer> servers;
       try {
         servers = new ArrayList<>(cluster.zooKeeperServers);
@@ -341,7 +341,7 @@ public class MiniZooKeeperCluster {
     // set the first one to be active ZK; Others are backups
     activeZKServerIndex = 0;
     started = true;
-    CAUSYNTH_SERVING.add(this);
+    CAUSYM_SERVING.add(this);
     int clientPort = clientPortList.get(activeZKServerIndex);
     LOG.info("Started MiniZooKeeperCluster and ran 'stat' on client port={}", clientPort);
     return clientPort;
@@ -381,7 +381,7 @@ public class MiniZooKeeperCluster {
    * @throws IOException if waiting for the shutdown of a server fails
    */
   public void shutdown() throws IOException {
-    CAUSYNTH_SERVING.remove(this);
+    CAUSYM_SERVING.remove(this);
     // shut down all the zk servers
     for (int i = 0; i < standaloneServerFactoryList.size(); i++) {
       NIOServerCnxnFactory standaloneServerFactory = standaloneServerFactoryList.get(i);

@@ -62,12 +62,12 @@ import org.apache.hbase.thirdparty.com.google.common.collect.Sets;
 public abstract class BaseLoadBalancer implements LoadBalancer {
 
   /**
-   * GraphChecker's automatic cluster ({@code causynth.cluster.automatic}): a region is placed on the
+   * Causym's automatic cluster ({@code causym.cluster.automatic}): a region is placed on the
    * servers in their sorted order, not at random, so a placement is the same in the recording and
    * in every replay (the servers' names and the order they become destinations in are,
-   * CausynthNodes): hbase:meta goes to the first region server.
+   * CausymNodes): hbase:meta goes to the first region server.
    */
-  private static final boolean CAUSYNTH_AUTOMATIC = Boolean.getBoolean("causynth.cluster.automatic");
+  private static final boolean CAUSYM_AUTOMATIC = Boolean.getBoolean("causym.cluster.automatic");
 
   private static final Logger LOG = LoggerFactory.getLogger(BaseLoadBalancer.class);
 
@@ -473,7 +473,7 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
     List<ServerName> usedSNs = new ArrayList<>(servers.size());
     Random rand = ThreadLocalRandom.current();
     do {
-      int i = CAUSYNTH_AUTOMATIC ? iterations % numServers : rand.nextInt(numServers);
+      int i = CAUSYM_AUTOMATIC ? iterations % numServers : rand.nextInt(numServers);
       sn = servers.get(i);
       if (!usedSNs.contains(sn)) {
         usedSNs.add(sn);
@@ -508,7 +508,7 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
     int numRegions = regions.size();
     int max = (int) Math.ceil((float) numRegions / numServers);
     int serverIdx = 0;
-    if (numServers > 1 && !CAUSYNTH_AUTOMATIC) {
+    if (numServers > 1 && !CAUSYM_AUTOMATIC) {
       serverIdx = rand.nextInt(numServers);
     }
     int regionIdx = 0;
@@ -530,7 +530,7 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
 
     List<RegionInfo> lastFewRegions = new ArrayList<>();
     // assign the remaining by going through the list and try to assign to servers one-by-one
-    serverIdx = CAUSYNTH_AUTOMATIC ? 0 : rand.nextInt(numServers);
+    serverIdx = CAUSYM_AUTOMATIC ? 0 : rand.nextInt(numServers);
     for (RegionInfo region : unassignedRegions) {
       boolean assigned = false;
       for (int j = 0; j < numServers; j++) { // try all servers one by one
@@ -553,7 +553,7 @@ public abstract class BaseLoadBalancer implements LoadBalancer {
     // make it optimal later. we can end up with this if numReplicas > numServers.
     int sprinkled = 0;
     for (RegionInfo region : lastFewRegions) {
-      int i = CAUSYNTH_AUTOMATIC ? sprinkled++ % numServers : rand.nextInt(numServers);
+      int i = CAUSYM_AUTOMATIC ? sprinkled++ % numServers : rand.nextInt(numServers);
       ServerName server = servers.get(i);
       assignments.computeIfAbsent(server, k -> new ArrayList<>()).add(region);
       cluster.doAssignRegion(region, server);
