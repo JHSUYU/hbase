@@ -73,7 +73,7 @@ import org.apache.hadoop.hbase.security.access.ZKPermissionWatcher;
 import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.unsafe.HBasePlatformDependent;
 import org.apache.hadoop.hbase.util.Addressing;
-import org.apache.hadoop.hbase.util.CausynthNodes;
+import org.apache.hadoop.hbase.util.CausymNodes;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.ConfigurationUtil;
 import org.apache.hadoop.hbase.util.DNS;
@@ -266,7 +266,7 @@ public abstract class HBaseServerBase<R extends HBaseRpcServicesBase<?>> extends
       this.conf = conf;
       this.eventLoopGroupConfig =
         NettyEventLoopGroupConfig.setup(conf, getClass().getSimpleName() + "-EventLoopGroup");
-      this.startcode = CausynthNodes.startcode(conf);
+      this.startcode = CausymNodes.startcode(conf);
       this.userProvider = UserProvider.instantiate(conf);
       this.msgInterval = conf.getInt("hbase.regionserver.msginterval", 3 * 1000);
       this.sleeper = new Sleeper(this.msgInterval, this);
@@ -351,7 +351,7 @@ public abstract class HBaseServerBase<R extends HBaseRpcServicesBase<?>> extends
         + " does not belong to this host. Correct configuration parameter: "
         + (isMaster ? "hbase.master.info.bindAddress" : "hbase.regionserver.info.bindAddress");
       LOG.error(msg);
-      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-28") IOException(msg);
+      throw new @edu.uva.liftlab.causym.annotation.CausymExceptionTarget("hbase-adhoc-28") IOException(msg);
     }
     // check if auto port bind enabled
     boolean auto = this.conf.getBoolean(HConstants.REGIONSERVER_INFO_PORT_AUTO, false);

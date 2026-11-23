@@ -31,10 +31,10 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * GraphChecker workload of the injected token-key cases (hbase-adhoc-34,
+ * Causym workload of the injected token-key cases (hbase-adhoc-34,
  * AuthenticationTokenSecretManager's InvalidToken, a token whose key id the validating server's
- * key map does not hold), hbase-buggy-15039's TestCausynthTokenKeyWatch with
- * TestCausynthTokenKeys' device: the elected key master rolls a new key once the cluster is up,
+ * key map does not hold), hbase-buggy-15039's TestCausymTokenKeyWatch with
+ * TestCausymTokenKeys' device: the elected key master rolls a new key once the cluster is up,
  * which reaches the other server only through its ZKSecretWatcher; two seconds later the key master
  * issues a token under the new key, the other server's map entry for that key is dropped (the
  * device stands for a watch event not yet processed, so that the validation takes its miss path),
@@ -43,13 +43,13 @@ import org.junit.jupiter.api.Test;
  */
 @Tag(SecurityTests.TAG)
 @Tag(MediumTests.TAG)
-public class TestCausynthTokenKeyWatch {
+public class TestCausymTokenKeyWatch {
 
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
 
   @BeforeAll
   public static void setUp() throws Exception {
-    UTIL.getConfiguration().setBoolean(RpcServer.CAUSYNTH_TOKEN_SECRETS, true);
+    UTIL.getConfiguration().setBoolean(RpcServer.CAUSYM_TOKEN_SECRETS, true);
     UTIL.startMiniCluster(1);
   }
 
@@ -72,7 +72,7 @@ public class TestCausynthTokenKeyWatch {
 
     leader.rollCurrentKey();
     Thread.sleep(2000);
-    Token<AuthenticationTokenIdentifier> token = leader.generateToken("causynth");
+    Token<AuthenticationTokenIdentifier> token = leader.generateToken("causym");
     AuthenticationTokenIdentifier identifier = token.decodeIdentifier();
     other.removeKey(identifier.getKeyId());
     assertArrayEquals(token.getPassword(), other.retrievePassword(identifier));
