@@ -35,7 +35,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * GraphChecker workload of hbase-adhoc-22 (NamespaceStateManager's region quota at table creation)
+ * Causym workload of hbase-adhoc-22 (NamespaceStateManager's region quota at table creation)
  * that holds HBASE-30483: a table truncated without its splits keeps its old region count in the
  * master's namespace quota. The namespace allows two regions; its first table has two, is truncated
  * to one (the quota still counts two) and is deleted while a one-region table is created. Here the
@@ -44,9 +44,9 @@ import org.junit.jupiter.api.Test;
  * table's one real region leaves room for it.
  */
 @Tag(MediumTests.TAG)
-public class TestCausynthTruncatedTableQuota {
+public class TestCausymTruncatedTableQuota {
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
-  private static final String NAMESPACE = "causynth_quota";
+  private static final String NAMESPACE = "causym_quota";
 
   @BeforeAll
   public static void setUp() throws Exception {

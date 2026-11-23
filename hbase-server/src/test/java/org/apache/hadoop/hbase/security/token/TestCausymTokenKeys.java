@@ -31,22 +31,24 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * GraphChecker workload of hbase-buggy-15039 (hbase-adhoc-34, AuthenticationTokenSecretManager
- * :160, a token whose key id the validating server's key map does not hold): the elected key
- * master rolls a new key once the cluster is up, which reaches the other server only through its
- * ZKSecretWatcher; two seconds later the key master issues a token under the new key and the other
- * server validates it. With HBASE-15039 put back the other server rejects a token whose key its
- * watcher has not applied yet; here the watcher has long applied it.
+ * Causym workload of hbase-adhoc-34 (owner 2026-10-19: no MiniKdc, no Kerberos): every
+ * server runs its token secret manager on a simple-authentication cluster (RpcServer
+ * #CAUSYM_TOKEN_SECRETS). The manager that won the key-master election generates a token; the
+ * other server's manager, which learnt the keys through ZooKeeper (ZKSecretWatcher), validates the
+ * token's identifier as its bytes decode, as SASL hands it over (retrievePassword: the key looked up
+ * by id, the keys refreshed from ZooKeeper when it is missing). The other server validates the token
+ * before it has processed the watch event of the token's key (the key is removed from its manager
+ * first), so the validation refreshes the keys from ZooKeeper.
  */
 @Tag(SecurityTests.TAG)
 @Tag(MediumTests.TAG)
-public class TestCausynthTokenKeyWatch {
+public class TestCausymTokenKeys {
 
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
 
   @BeforeAll
   public static void setUp() throws Exception {
-    UTIL.getConfiguration().setBoolean(RpcServer.CAUSYNTH_TOKEN_SECRETS, true);
+    UTIL.getConfiguration().setBoolean(RpcServer.CAUSYM_TOKEN_SECRETS, true);
     UTIL.startMiniCluster(1);
   }
 
@@ -56,7 +58,7 @@ public class TestCausynthTokenKeyWatch {
   }
 
   @Test
-  public void theOtherServerValidatesATokenOfANewKey() throws Exception {
+  public void anotherServerValidatesTheKeyMastersToken() throws Exception {
     SingleProcessHBaseCluster cluster = UTIL.getMiniHBaseCluster();
     AuthenticationTokenSecretManager onMaster = (AuthenticationTokenSecretManager) ((RpcServer) cluster
       .getMaster().getRpcServer()).getSecretManager();
@@ -67,10 +69,9 @@ public class TestCausynthTokenKeyWatch {
     AuthenticationTokenSecretManager other = leader == onMaster ? onServer : onMaster;
     UTIL.waitFor(60000, () -> leader.getCurrentKey() != null);
 
-    leader.rollCurrentKey();
-    Thread.sleep(2000);
-    Token<AuthenticationTokenIdentifier> token = leader.generateToken("causynth");
+    Token<AuthenticationTokenIdentifier> token = leader.generateToken("causym");
     AuthenticationTokenIdentifier identifier = token.decodeIdentifier();
+    other.removeKey(identifier.getKeyId());
     assertArrayEquals(token.getPassword(), other.retrievePassword(identifier));
   }
 }

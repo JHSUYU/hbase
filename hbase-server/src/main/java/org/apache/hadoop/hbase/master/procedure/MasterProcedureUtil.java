@@ -224,7 +224,7 @@ public final class MasterProcedureUtil {
       String groupName = optGroupName.get();
       RSGroupInfo group = groups.getRSGroup(groupName);
       if (group == null) {
-        throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-bugs-ns-rsgroup-removal") ConstraintException(
+        throw new @edu.uva.liftlab.causym.annotation.CausymExceptionTarget("hbase-bugs-ns-rsgroup-removal") ConstraintException(
           "Region server group " + groupName + " for " + forWhom.get() + " does not exit");
       }
       return group;

@@ -17,7 +17,7 @@
  */
 package org.apache.hadoop.hbase.util;
 
-import edu.uva.liftlab.graphchecker.runtime.MessageDoors;
+import edu.uva.liftlab.causym.runtime.MessageDoors;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.lang.reflect.Constructor;
@@ -79,7 +79,7 @@ public class JVMClusterUtil {
    */
   public static JVMClusterUtil.RegionServerThread createRegionServerThread(final Configuration c,
     final Class<? extends HRegionServer> hrsc, final int index) throws IOException {
-    CausynthNodes.naming(c, HConstants.REGIONSERVER_PORT);
+    CausymNodes.naming(c, HConstants.REGIONSERVER_PORT);
     HRegionServer server;
     try {
       Constructor<? extends HRegionServer> ctor = hrsc.getConstructor(Configuration.class);
@@ -96,7 +96,7 @@ public class JVMClusterUtil {
   }
 
   /**
-   * Starts a node's thread: GraphChecker attributes what the thread runs, and what it starts, to
+   * Starts a node's thread: Causym attributes what the thread runs, and what it starts, to
    * {@code node}, a registered node, whoever starts it.
    */
   public static void start(Thread thread, Object node) {
@@ -134,7 +134,7 @@ public class JVMClusterUtil {
    */
   public static JVMClusterUtil.MasterThread createMasterThread(final Configuration c,
     final Class<? extends HMaster> hmc, final int index) throws IOException {
-    CausynthNodes.naming(c, HConstants.MASTER_PORT);
+    CausymNodes.naming(c, HConstants.MASTER_PORT);
     HMaster server;
     try {
       server = hmc.getConstructor(Configuration.class).newInstance(c);
@@ -187,7 +187,7 @@ public class JVMClusterUtil {
       start(t, t.getMaster());
       // An automatic cluster's first master is its active one, in every run: the others start
       // once it holds the master znode, so they wait as backups (no election race).
-      if (CausynthNodes.automatic() && t == masters.get(0)) {
+      if (CausymNodes.automatic() && t == masters.get(0)) {
         waitForEvent(startTimeout, "active", () -> findActiveMaster(masters) != null);
       }
     }
