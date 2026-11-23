@@ -763,7 +763,7 @@ public class AssignmentManager {
   private void preTransitCheck(RegionStateNode regionNode, RegionState.State[] expectedStates)
     throws HBaseIOException {
     if (regionNode.getProcedure() != null) {
-      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-10") HBaseIOException(
+      throw new @edu.uva.liftlab.causym.annotation.CausymExceptionTarget("hbase-adhoc-10") HBaseIOException(
         regionNode + " is currently in transition; pid=" + regionNode.getProcedure().getProcId());
     }
     RegionState.State state = regionNode.getState();
@@ -772,7 +772,7 @@ public class AssignmentManager {
       expected > 0 && (expected < 3 || !state.matches(Arrays.copyOfRange(expectedStates, 2, expected)))
         && (expected < 2 || state != expectedStates[1]) && state != expectedStates[0]
     ) {
-      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-11") DoNotRetryRegionException(UNEXPECTED_STATE_REGION + regionNode);
+      throw new @edu.uva.liftlab.causym.annotation.CausymExceptionTarget("hbase-adhoc-11") DoNotRetryRegionException(UNEXPECTED_STATE_REGION + regionNode);
     }
     TableState tableState;
     try {
@@ -785,7 +785,7 @@ public class AssignmentManager {
       tableState != null && (tableState.getState() == TableState.State.DISABLED
         || tableState.getState() == TableState.State.DISABLING)
     ) {
-      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-12") DoNotRetryIOException(regionNode.getTable() + " is disabled for " + regionNode);
+      throw new @edu.uva.liftlab.causym.annotation.CausymExceptionTarget("hbase-adhoc-12") DoNotRetryIOException(regionNode.getTable() + " is disabled for " + regionNode);
     }
   }
 

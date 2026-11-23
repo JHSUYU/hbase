@@ -151,7 +151,7 @@ public class MasterAddressTracker extends ZKNodeTracker {
     try {
       byte[] data = super.getData(refresh);
       ServerName master = ProtobufUtil.parseServerNameFrom(data);
-      RecoverableZooKeeper.causynthDecoded(data, master);
+      RecoverableZooKeeper.causymDecoded(data, master);
       return master;
     } catch (DeserializationException e) {
       LOG.warn("Failed parse", e);
@@ -181,7 +181,7 @@ public class MasterAddressTracker extends ZKNodeTracker {
     }
     try {
       ServerName master = ProtobufUtil.parseServerNameFrom(data);
-      RecoverableZooKeeper.causynthDecoded(data, master);
+      RecoverableZooKeeper.causymDecoded(data, master);
       return master;
     } catch (DeserializationException e) {
       KeeperException ke = new KeeperException.DataInconsistencyException();
@@ -208,7 +208,7 @@ public class MasterAddressTracker extends ZKNodeTracker {
     }
     // TODO javadoc claims we return null in this case. :/
     if (data == null) {
-      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-37") IOException("Can't get master address from ZooKeeper; znode data == null");
+      throw new @edu.uva.liftlab.causym.annotation.CausymExceptionTarget("hbase-adhoc-37") IOException("Can't get master address from ZooKeeper; znode data == null");
     }
     try {
       return parse(data).getInfoPort();
