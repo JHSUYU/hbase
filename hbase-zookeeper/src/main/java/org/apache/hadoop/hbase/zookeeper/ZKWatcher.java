@@ -17,7 +17,7 @@
  */
 package org.apache.hadoop.hbase.zookeeper;
 
-import edu.uva.liftlab.graphchecker.runtime.MessageDoors;
+import edu.uva.liftlab.causym.runtime.MessageDoors;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -568,28 +568,28 @@ public class ZKWatcher implements Watcher, Abortable, Closeable {
         // Otherwise pass along to the listeners
         case NodeCreated: {
           for (ZKListener listener : listeners) {
-            causynthNotified(listener, event, () -> listener.nodeCreated(event.getPath()));
+            causymNotified(listener, event, () -> listener.nodeCreated(event.getPath()));
           }
           break;
         }
 
         case NodeDeleted: {
           for (ZKListener listener : listeners) {
-            causynthNotified(listener, event, () -> listener.nodeDeleted(event.getPath()));
+            causymNotified(listener, event, () -> listener.nodeDeleted(event.getPath()));
           }
           break;
         }
 
         case NodeDataChanged: {
           for (ZKListener listener : listeners) {
-            causynthNotified(listener, event, () -> listener.nodeDataChanged(event.getPath()));
+            causymNotified(listener, event, () -> listener.nodeDataChanged(event.getPath()));
           }
           break;
         }
 
         case NodeChildrenChanged: {
           for (ZKListener listener : listeners) {
-            causynthNotified(listener, event, () -> listener.nodeChildrenChanged(event.getPath()));
+            causymNotified(listener, event, () -> listener.nodeChildrenChanged(event.getPath()));
           }
           break;
         }
@@ -601,18 +601,18 @@ public class ZKWatcher implements Watcher, Abortable, Closeable {
   }
 
   /**
-   * GraphChecker: each listener's callback of a watch event is a notification of the store. A
+   * Causym: each listener's callback of a watch event is a notification of the store. A
    * callback is no daemon turn: ZooKeeper folds the changes that arrive before a watch is set
    * again into one event, so how many callbacks a run takes is its timing's; the first version a
    * callback reads is what caused it.
    */
-  private static void causynthNotified(ZKListener listener, WatchedEvent event,
+  private static void causymNotified(ZKListener listener, WatchedEvent event,
     Runnable callback) {
     String kind = listener.getClass().getName();
     int lambda = kind.indexOf("$$Lambda");
     MessageDoors.notified(
       kind.substring(kind.lastIndexOf('.') + 1, lambda < 0 ? kind.length() : lambda),
-      RecoverableZooKeeper.CAUSYNTH_ZK, event.getPath(), String.valueOf(event.getType()),
+      RecoverableZooKeeper.CAUSYM_ZK, event.getPath(), String.valueOf(event.getType()),
       callback);
   }
 

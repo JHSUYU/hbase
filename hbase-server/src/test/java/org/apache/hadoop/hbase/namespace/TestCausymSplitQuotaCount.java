@@ -37,16 +37,16 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Native demonstration of hbase-inj-05 (no GraphChecker run): TestCausynthSplitTableQuota's steps
+ * Native demonstration of hbase-inj-05 (no Causym run): TestCausymSplitTableQuota's steps
  * with the invariant asserted. After the split the master's namespace quota must count the split
  * table's two regions, and a further one-region table must be refused (three regions under a
  * quota of two). The unmodified code passes; with hbase-inj-05 the count is one and the table is
  * created, and nothing in the system reports it.
  */
 @Tag(MediumTests.TAG)
-public class TestCausynthSplitQuotaCount {
+public class TestCausymSplitQuotaCount {
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
-  private static final String NAMESPACE = "causynth_split_count";
+  private static final String NAMESPACE = "causym_split_count";
 
   @BeforeAll
   public static void setUp() throws Exception {
@@ -67,7 +67,7 @@ public class TestCausynthSplitQuotaCount {
     admin.createNamespace(NamespaceDescriptor.create(NAMESPACE)
       .addConfiguration(TableNamespaceManager.KEY_MAX_REGIONS, "2").build());
     TableName split = TableName.valueOf(NAMESPACE, "split");
-    admin.createTable(TestCausynthSplitTableQuota.table(split));
+    admin.createTable(TestCausymSplitTableQuota.table(split));
     RegionInfo region = admin.getRegions(split).get(0);
     admin.splitRegionAsync(region.getRegionName(), Bytes.toBytes("m")).get();
 
@@ -76,7 +76,7 @@ public class TestCausynthSplitQuotaCount {
       .getNamespaceQuotaManager().getState(NAMESPACE).getRegionCount();
     boolean refused;
     try {
-      admin.createTable(TestCausynthSplitTableQuota.table(TableName.valueOf(NAMESPACE, "created")));
+      admin.createTable(TestCausymSplitTableQuota.table(TableName.valueOf(NAMESPACE, "created")));
       refused = false;
     } catch (IOException e) {
       refused = true;

@@ -325,8 +325,8 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
    */
   public HBaseTestingUtil(@Nullable Configuration conf) {
     super(conf);
-    if (CausynthHBaseCluster.automatic()) {
-      CausynthHBaseCluster.observeLocalClusters(this);
+    if (CausymHBaseCluster.automatic()) {
+      CausymHBaseCluster.observeLocalClusters(this);
     }
 
     // a hbase checksum verification failure will cause unit tests to fail
@@ -667,10 +667,10 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
 
   public MiniDFSCluster startMiniDFSCluster(int servers, final String[] racks, String[] hosts)
     throws Exception {
-    // An automatic cluster runs on the local filesystem (CausynthHBaseCluster#configure), whoever
+    // An automatic cluster runs on the local filesystem (CausymHBaseCluster#configure), whoever
     // asks for an HDFS: the mini cluster's start or the test itself.
-    if (CausynthHBaseCluster.automatic()) {
-      LOG.info("NOT STARTING DFS: a GraphChecker workload runs on the local filesystem");
+    if (CausymHBaseCluster.automatic()) {
+      LOG.info("NOT STARTING DFS: a Causym workload runs on the local filesystem");
       return null;
     }
     createDirsAndSetProperties();
@@ -876,8 +876,8 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
       throw new IllegalStateException("A mini-cluster is already running");
     }
     miniClusterRunning = true;
-    if (CausynthHBaseCluster.automatic()) {
-      CausynthHBaseCluster.configure(conf);
+    if (CausymHBaseCluster.automatic()) {
+      CausymHBaseCluster.configure(conf);
     }
 
     setupClusterTestDir();
@@ -909,8 +909,8 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
    */
   public SingleProcessHBaseCluster startMiniHBaseCluster(StartTestingClusterOption option)
     throws IOException, InterruptedException {
-    if (CausynthHBaseCluster.automatic()) {
-      CausynthHBaseCluster.configure(conf);
+    if (CausymHBaseCluster.automatic()) {
+      CausymHBaseCluster.configure(conf);
     }
     // Now do the mini hbase cluster. Set the hbase.rootdir in config.
     createRootDir(option.isCreateRootDir());
@@ -930,8 +930,8 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
       conf.setInt(ServerManager.WAIT_ON_REGIONSERVERS_MAXTOSTART, option.getNumRegionServers());
     }
 
-    if (CausynthHBaseCluster.automatic()) {
-      CausynthHBaseCluster.openStartupWindow(this);
+    if (CausymHBaseCluster.automatic()) {
+      CausymHBaseCluster.openStartupWindow(this);
     }
     Configuration c = new Configuration(this.conf);
     this.hbaseCluster = new SingleProcessHBaseCluster(c, option.getNumMasters(),
@@ -951,8 +951,8 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
 
     getAdmin(); // create immediately the hbaseAdmin
     LOG.info("Minicluster is up; activeMaster={}", getHBaseCluster().getMaster());
-    if (CausynthHBaseCluster.automatic()) {
-      CausynthHBaseCluster.registerAutomatically(this);
+    if (CausymHBaseCluster.automatic()) {
+      CausymHBaseCluster.registerAutomatically(this);
     }
 
     return (SingleProcessHBaseCluster) hbaseCluster;
@@ -1110,8 +1110,8 @@ public class HBaseTestingUtil extends HBaseZKTestingUtil {
    * @throws java.io.IOException in case command is unsuccessful
    */
   public void shutdownMiniHBaseCluster() throws IOException {
-    if (CausynthHBaseCluster.automatic()) {
-      CausynthHBaseCluster.shutdownAutomatically();
+    if (CausymHBaseCluster.automatic()) {
+      CausymHBaseCluster.shutdownAutomatically();
     }
     cleanup();
     if (this.hbaseCluster != null) {

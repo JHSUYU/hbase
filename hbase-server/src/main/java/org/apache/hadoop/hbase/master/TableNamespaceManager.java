@@ -46,7 +46,7 @@ import org.apache.hadoop.hbase.master.procedure.DisableTableProcedure;
 import org.apache.hadoop.hbase.master.procedure.MigrateNamespaceTableProcedure;
 import org.apache.hadoop.hbase.rsgroup.RSGroupInfo;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.CausynthNodes;
+import org.apache.hadoop.hbase.util.CausymNodes;
 import org.apache.hadoop.hbase.util.FutureUtils;
 import org.apache.yetus.audience.InterfaceAudience;
 
@@ -70,7 +70,7 @@ public class TableNamespaceManager {
   private final ConcurrentMap<String, NamespaceDescriptor> cache = new ConcurrentHashMap<>();
 
   /**
-   * GraphChecker: how many cached namespaces name each region server group. A namespace's group
+   * Causym: how many cached namespaces name each region server group. A namespace's group
    * is a String in its descriptor's TreeMap, whose compare the engine cannot state; this count is
    * a value it tracks, written where the cache gains or loses a namespace.
    */
@@ -230,7 +230,7 @@ public class TableNamespaceManager {
 
   public void addOrUpdateNamespace(NamespaceDescriptor ns) throws IOException {
     checkMigrationDone();
-    if (CausynthNodes.automatic()) {
+    if (CausymNodes.automatic()) {
       FutureUtils.get(masterServices.getAsyncConnection().getTableBuilder(TableName.META_TABLE_NAME)
         .setMaxAttempts(1).build().put(namespacePut(ns)));
     } else {

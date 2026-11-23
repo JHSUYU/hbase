@@ -17,7 +17,7 @@
  */
 package org.apache.hadoop.hbase.ipc;
 
-import edu.uva.liftlab.graphchecker.runtime.MessageDoors;
+import edu.uva.liftlab.causym.runtime.MessageDoors;
 import java.io.DataInput;
 import java.io.EOFException;
 import java.io.IOException;
@@ -419,7 +419,7 @@ abstract class RpcConnection {
     } else {
       cellBlockScanner = null;
     }
-    CausynthRpc.parsed(call, value);
+    CausymRpc.parsed(call, value);
     call.setResponse(value, cellBlockScanner);
   }
 
@@ -480,10 +480,10 @@ abstract class RpcConnection {
       return;
     }
     call.callStats.setResponseSizeBytes(totalSize);
-    MessageDoors.Inbound causynth = CausynthRpc.responded(call, responseHeader);
+    MessageDoors.Inbound causym = CausymRpc.responded(call, responseHeader);
     if (remoteExc != null) {
       call.setException(remoteExc);
-      CausynthRpc.handled(causynth);
+      CausymRpc.handled(causym);
       return;
     }
     try {
@@ -497,7 +497,7 @@ abstract class RpcConnection {
       // problem
       throw e;
     } finally {
-      CausynthRpc.handled(causynth);
+      CausymRpc.handled(causym);
     }
   }
 }

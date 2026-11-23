@@ -35,8 +35,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * GraphChecker workload of hbase-inj-05 (hbase-adhoc-22's point, NamespaceStateManager's region
- * quota at table creation), from hbase-inj-02's TestCausynthMergedTableQuota with a split in place
+ * Causym workload of hbase-inj-05 (hbase-adhoc-22's point, NamespaceStateManager's region
+ * quota at table creation), from hbase-inj-02's TestCausymMergedTableQuota with a split in place
  * of the merge. The namespace allows two regions; a one-region table is created in it, its region
  * is split in two, and a one-region table is created. With hbase-inj-05 injected the split's new
  * region is never counted: the creation is checked against one region, fits, and the namespace
@@ -44,9 +44,9 @@ import org.junit.jupiter.api.Test;
  * counted and the creation is refused at the check.
  */
 @Tag(MediumTests.TAG)
-public class TestCausynthSplitTableQuota {
+public class TestCausymSplitTableQuota {
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
-  private static final String NAMESPACE = "causynth_split_quota";
+  private static final String NAMESPACE = "causym_split_quota";
 
   @BeforeAll
   public static void setUp() throws Exception {
