@@ -55,12 +55,12 @@ public final class NettyRpcClientConfigHelper {
   private static final String CONFIG_NAME = "global-event-loop";
 
   /**
-   * GraphChecker's automatic cluster (causynth.cluster.automatic): each configuration given an
+   * Causym's automatic cluster (causym.cluster.automatic): each configuration given an
    * event loop names its own, so a server's RPC client runs on that server's event loops -- under
    * the one name every server's setup overwrote, the nodes of a mini cluster shared the last
    * server's, and one node's calls and callbacks ran on another's threads.
    */
-  private static final boolean OWN_EVENT_LOOPS = Boolean.getBoolean("causynth.cluster.automatic");
+  private static final boolean OWN_EVENT_LOOPS = Boolean.getBoolean("causym.cluster.automatic");
   private static final AtomicInteger CONFIGS = new AtomicInteger();
 
   private static final Map<String,

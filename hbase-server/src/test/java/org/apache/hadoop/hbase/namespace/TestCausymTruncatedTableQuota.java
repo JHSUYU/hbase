@@ -17,14 +17,12 @@
  */
 package org.apache.hadoop.hbase.namespace;
 
-import java.util.List;
 import java.util.concurrent.Future;
 import org.apache.hadoop.hbase.HBaseTestingUtil;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.ColumnFamilyDescriptorBuilder;
-import org.apache.hadoop.hbase.client.RegionInfo;
 import org.apache.hadoop.hbase.client.TableDescriptor;
 import org.apache.hadoop.hbase.client.TableDescriptorBuilder;
 import org.apache.hadoop.hbase.master.TableNamespaceManager;
@@ -37,19 +35,18 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * GraphChecker workload of hbase-inj-02 (hbase-adhoc-22, NamespaceStateManager's region quota at
- * table creation), from hbase-adhoc-22's TestCausynthTruncatedTableQuota with a merge in place of
- * the truncate. The namespace allows two regions; its first table has two, they are merged into
- * one, and the table is deleted while a one-region table is created. With hbase-inj-02 injected
- * the merge leaves the table's two regions in the master's namespace quota. Here the deletion's
- * quota release lands first and the creation fits. Had the creation's check run before the
- * release, it would count the merged table's two regions and refuse the creation, where the
+ * Causym workload of hbase-adhoc-22 (NamespaceStateManager's region quota at table creation)
+ * that holds HBASE-30483: a table truncated without its splits keeps its old region count in the
+ * master's namespace quota. The namespace allows two regions; its first table has two, is truncated
+ * to one (the quota still counts two) and is deleted while a one-region table is created. Here the
+ * deletion's quota release lands first and the creation fits. Had the creation's check run before
+ * the release, it would count the truncated table's two regions and refuse the creation, where the
  * table's one real region leaves room for it.
  */
 @Tag(MediumTests.TAG)
-public class TestCausynthMergedTableQuota {
+public class TestCausymTruncatedTableQuota {
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
-  private static final String NAMESPACE = "causynth_quota";
+  private static final String NAMESPACE = "causym_quota";
 
   @BeforeAll
   public static void setUp() throws Exception {
@@ -65,18 +62,17 @@ public class TestCausynthMergedTableQuota {
   }
 
   @Test
-  public void createWhileAMergedTableIsDeleted() throws Exception {
+  public void createWhileATruncatedTableIsDeleted() throws Exception {
     Admin admin = UTIL.getAdmin();
     admin.createNamespace(NamespaceDescriptor.create(NAMESPACE)
       .addConfiguration(TableNamespaceManager.KEY_MAX_REGIONS, "2").build());
-    TableName merged = TableName.valueOf(NAMESPACE, "merged");
-    admin.createTable(table(merged), new byte[][] { Bytes.toBytes("m") });
-    List<RegionInfo> regions = admin.getRegions(merged);
-    admin.mergeRegionsAsync(new byte[][] { regions.get(0).getEncodedNameAsBytes(),
-      regions.get(1).getEncodedNameAsBytes() }, false).get();
-    admin.disableTable(merged);
+    TableName truncated = TableName.valueOf(NAMESPACE, "truncated");
+    admin.createTable(table(truncated), new byte[][] { Bytes.toBytes("m") });
+    admin.disableTable(truncated);
+    admin.truncateTable(truncated, false);
+    admin.disableTable(truncated);
 
-    Future<Void> deletion = admin.deleteTableAsync(merged);
+    Future<Void> deletion = admin.deleteTableAsync(truncated);
     Thread.sleep(2000);
     admin.createTable(table(TableName.valueOf(NAMESPACE, "created")));
     deletion.get();

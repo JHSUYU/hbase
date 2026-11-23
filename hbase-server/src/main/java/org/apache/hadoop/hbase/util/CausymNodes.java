@@ -27,15 +27,15 @@ import org.apache.hadoop.hbase.HConstants;
 import org.apache.yetus.audience.InterfaceAudience;
 
 /**
- * The names an automatic cluster's masters and region servers get (GraphChecker's
- * {@code causynth.cluster.automatic} set on the JVM): the same in the recording and in every
+ * The names an automatic cluster's masters and region servers get (Causym's
+ * {@code causym.cluster.automatic} set on the JVM): the same in the recording and in every
  * replay, so the order the cluster keeps its servers in -- a {@code ServerName}'s host, port and
  * start code, which the master's online servers are sorted by and its assignment draws from -- is
  * the order the nodes were made in. Each node, as it is constructed ({@link JVMClusterUtil}),
  * takes a port above every one handed out before (the first at random: replays of one case share
  * a host) where its configuration asks for any free one, and a start code that is a function of
  * its place in that order, not of the wall clock (a restarted node is a later one); its host is
- * {@code localhost} (CausynthHBaseCluster#configure). A region server reports for duty only once
+ * {@code localhost} (CausymHBaseCluster#configure). A region server reports for duty only once
  * the one made before it has sent its first load report, the one that makes it a destination for
  * regions (ServerManager#createDestinationServersList, HBASE-25032), so the servers a placement
  * draws from are always the first ones made, in their order: hbase:meta is placed on the first
@@ -43,12 +43,12 @@ import org.apache.yetus.audience.InterfaceAudience;
  * reports for duty at once.
  */
 @InterfaceAudience.Private
-public final class CausynthNodes {
-  public static final String AUTOMATIC = "causynth.cluster.automatic";
+public final class CausymNodes {
+  public static final String AUTOMATIC = "causym.cluster.automatic";
   /** A node's start code, set on its own configuration when it is constructed. */
-  public static final String STARTCODE = "hbase.causynth.startcode";
+  public static final String STARTCODE = "hbase.causym.startcode";
   /** A region server's place in the order region servers report in, set when it is made. */
-  public static final String REGISTRATION = "hbase.causynth.registration";
+  public static final String REGISTRATION = "hbase.causym.registration";
   /** The start code of the first node made; each later one's is 1000 more than the one before. */
   public static final long FIRST_STARTCODE = 1_700_000_000_000L;
   private static final long REGISTRATION_WAIT_MINUTES = 5;
@@ -58,7 +58,7 @@ public final class CausynthNodes {
   private static int regionServers;
   private static int registered;
 
-  private CausynthNodes() {
+  private CausymNodes() {
   }
 
   public static boolean automatic() {

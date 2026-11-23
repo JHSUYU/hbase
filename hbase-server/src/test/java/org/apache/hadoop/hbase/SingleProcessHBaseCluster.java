@@ -189,8 +189,8 @@ public class SingleProcessHBaseCluster extends HBaseClusterInterface {
       }
 
       // start up a LocalHBaseCluster
-      hbaseCluster = CausynthHBaseCluster.automatic()
-        ? CausynthHBaseCluster.localCluster(conf, nMasterNodes, numAlwaysStandByMasters,
+      hbaseCluster = CausymHBaseCluster.automatic()
+        ? CausymHBaseCluster.localCluster(conf, nMasterNodes, numAlwaysStandByMasters,
           masterClass, regionserverClass)
         : new LocalHBaseCluster(conf, nMasterNodes, numAlwaysStandByMasters, 0, masterClass,
           regionserverClass);

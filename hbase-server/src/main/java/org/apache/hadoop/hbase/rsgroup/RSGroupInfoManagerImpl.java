@@ -199,7 +199,7 @@ final class RSGroupInfoManagerImpl implements RSGroupInfoManager {
   private volatile RSGroupInfoHolder holder = new RSGroupInfoHolder();
 
   /**
-   * GraphChecker: the groups of {@link #holder}, in a map the engine tracks. The holder's own map is
+   * Causym: the groups of {@link #holder}, in a map the engine tracks. The holder's own map is
    * built in its constructor and handed on by replacing {@link #holder}, a reference no read of a
    * group lookup states; this map is mutated where the holder is replaced
    * ({@link #resetRSGroupMap}), so a lookup's read names the writer that removed or added the
