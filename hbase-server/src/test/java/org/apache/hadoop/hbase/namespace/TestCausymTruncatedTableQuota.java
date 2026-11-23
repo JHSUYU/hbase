@@ -17,12 +17,13 @@
  */
 package org.apache.hadoop.hbase.namespace;
 
+import java.util.concurrent.Future;
 import org.apache.hadoop.hbase.HBaseTestingUtil;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.ColumnFamilyDescriptorBuilder;
-import org.apache.hadoop.hbase.client.RegionInfo;
+import org.apache.hadoop.hbase.client.TableDescriptor;
 import org.apache.hadoop.hbase.client.TableDescriptorBuilder;
 import org.apache.hadoop.hbase.master.TableNamespaceManager;
 import org.apache.hadoop.hbase.quotas.QuotaUtil;
@@ -34,19 +35,18 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * GraphChecker workload of hbase-inj-03 (hbase-adhoc-08, ClusterSchemaServiceImpl:111, a
- * namespace the master's namespace cache does not hold), from hbase-adhoc-22's
- * TestCausynthTruncatedTableQuota: with the namespace quota on, a namespace allowing ten regions
- * is created, a one-region table in it, the namespace is modified to allow twenty, and the table's
- * region is split. The split's namespace-quota check (SplitTableRegionProcedure's PRE_OPERATION,
- * NamespaceStateManager#checkAndUpdateNamespaceRegionCount) looks the namespace up on a procedure
- * worker. With hbase-inj-03 injected, a modification whose hbase:meta put fails drops the cached
- * descriptor and finishes, so that lookup finds no namespace; here the put succeeds.
+ * Causym workload of hbase-adhoc-22 (NamespaceStateManager's region quota at table creation)
+ * that holds HBASE-30483: a table truncated without its splits keeps its old region count in the
+ * master's namespace quota. The namespace allows two regions; its first table has two, is truncated
+ * to one (the quota still counts two) and is deleted while a one-region table is created. Here the
+ * deletion's quota release lands first and the creation fits. Had the creation's check run before
+ * the release, it would count the truncated table's two regions and refuse the creation, where the
+ * table's one real region leaves room for it.
  */
 @Tag(MediumTests.TAG)
-public class TestCausynthNamespaceQuotaSplit {
+public class TestCausymTruncatedTableQuota {
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
-  private static final String NAMESPACE = "causynth_split";
+  private static final String NAMESPACE = "causym_quota";
 
   @BeforeAll
   public static void setUp() throws Exception {
@@ -62,16 +62,24 @@ public class TestCausynthNamespaceQuotaSplit {
   }
 
   @Test
-  public void splitAfterTheNamespaceIsModified() throws Exception {
+  public void createWhileATruncatedTableIsDeleted() throws Exception {
     Admin admin = UTIL.getAdmin();
     admin.createNamespace(NamespaceDescriptor.create(NAMESPACE)
-      .addConfiguration(TableNamespaceManager.KEY_MAX_REGIONS, "10").build());
-    TableName table = TableName.valueOf(NAMESPACE, "split");
-    admin.createTable(TableDescriptorBuilder.newBuilder(table)
-      .setColumnFamily(ColumnFamilyDescriptorBuilder.of("f")).build());
-    admin.modifyNamespace(NamespaceDescriptor.create(NAMESPACE)
-      .addConfiguration(TableNamespaceManager.KEY_MAX_REGIONS, "20").build());
-    RegionInfo region = admin.getRegions(table).get(0);
-    admin.splitRegionAsync(region.getRegionName(), Bytes.toBytes("m")).get();
+      .addConfiguration(TableNamespaceManager.KEY_MAX_REGIONS, "2").build());
+    TableName truncated = TableName.valueOf(NAMESPACE, "truncated");
+    admin.createTable(table(truncated), new byte[][] { Bytes.toBytes("m") });
+    admin.disableTable(truncated);
+    admin.truncateTable(truncated, false);
+    admin.disableTable(truncated);
+
+    Future<Void> deletion = admin.deleteTableAsync(truncated);
+    Thread.sleep(2000);
+    admin.createTable(table(TableName.valueOf(NAMESPACE, "created")));
+    deletion.get();
+  }
+
+  private static TableDescriptor table(TableName name) {
+    return TableDescriptorBuilder.newBuilder(name)
+      .setColumnFamily(ColumnFamilyDescriptorBuilder.of("f")).build();
   }
 }

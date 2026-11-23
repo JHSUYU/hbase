@@ -17,7 +17,7 @@
  */
 package org.apache.hadoop.hbase.master;
 
-import edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget;
+import edu.uva.liftlab.causym.annotation.CausymExceptionTarget;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -2626,7 +2626,7 @@ public class MasterRpcServices extends HBaseRpcServicesBase<HMaster>
       LOG.warn(
         "Report for procId: {} and initiatingMasterAT {} received on master with activeTime {}",
         procId, initiatingMasterActiveTime, server.getMasterActiveTime());
-      throw new @CausynthExceptionTarget("hbase-bugs-master-active-time")
+      throw new @CausymExceptionTarget("hbase-bugs-master-active-time")
         MasterNotRunningException("Another master is active");
     }
   }
