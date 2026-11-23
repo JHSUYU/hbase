@@ -31,9 +31,9 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * GraphChecker workload of hbase-adhoc-34 (owner 2026-10-19: no MiniKdc, no Kerberos): every
+ * Causym workload of hbase-adhoc-34 (owner 2026-10-19: no MiniKdc, no Kerberos): every
  * server runs its token secret manager on a simple-authentication cluster (RpcServer
- * #CAUSYNTH_TOKEN_SECRETS). The manager that won the key-master election generates a token; the
+ * #CAUSYM_TOKEN_SECRETS). The manager that won the key-master election generates a token; the
  * other server's manager, which learnt the keys through ZooKeeper (ZKSecretWatcher), validates the
  * token's identifier as its bytes decode, as SASL hands it over (retrievePassword: the key looked up
  * by id, the keys refreshed from ZooKeeper when it is missing). The other server validates the token
@@ -42,13 +42,13 @@ import org.junit.jupiter.api.Test;
  */
 @Tag(SecurityTests.TAG)
 @Tag(MediumTests.TAG)
-public class TestCausynthTokenKeys {
+public class TestCausymTokenKeys {
 
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
 
   @BeforeAll
   public static void setUp() throws Exception {
-    UTIL.getConfiguration().setBoolean(RpcServer.CAUSYNTH_TOKEN_SECRETS, true);
+    UTIL.getConfiguration().setBoolean(RpcServer.CAUSYM_TOKEN_SECRETS, true);
     UTIL.startMiniCluster(1);
   }
 
@@ -69,7 +69,7 @@ public class TestCausynthTokenKeys {
     AuthenticationTokenSecretManager other = leader == onMaster ? onServer : onMaster;
     UTIL.waitFor(60000, () -> leader.getCurrentKey() != null);
 
-    Token<AuthenticationTokenIdentifier> token = leader.generateToken("causynth");
+    Token<AuthenticationTokenIdentifier> token = leader.generateToken("causym");
     AuthenticationTokenIdentifier identifier = token.decodeIdentifier();
     other.removeKey(identifier.getKeyId());
     assertArrayEquals(token.getPassword(), other.retrievePassword(identifier));

@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * GraphChecker workload of hbase-buggy-20642 (hbase-adhoc-04, AbstractStateMachineTableProcedure
+ * Causym workload of hbase-buggy-20642 (hbase-adhoc-04, AbstractStateMachineTableProcedure
  * :163, a table procedure's check that its table is enabled): two tables are created and each is
  * disabled once through the client's Admin. With HBASE-20642 put back, a disableTable attempt
  * builds its request with a new nonce, so an attempt retried after its reply was lost is not the
@@ -40,7 +40,7 @@ import org.junit.jupiter.api.Test;
  */
 @Tag(MasterTests.TAG)
 @Tag(MediumTests.TAG)
-public class TestCausynthDisableRetryNonce {
+public class TestCausymDisableRetryNonce {
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
 
   @BeforeAll
@@ -56,8 +56,8 @@ public class TestCausynthDisableRetryNonce {
   @Test
   public void disableTwoTables() throws Exception {
     Admin admin = UTIL.getAdmin();
-    TableName first = TableName.valueOf("causynth_disable_first");
-    TableName second = TableName.valueOf("causynth_disable_second");
+    TableName first = TableName.valueOf("causym_disable_first");
+    TableName second = TableName.valueOf("causym_disable_second");
     for (TableName table : new TableName[] { first, second }) {
       admin.createTable(TableDescriptorBuilder.newBuilder(table)
         .setColumnFamily(ColumnFamilyDescriptorBuilder.of("f")).build());
