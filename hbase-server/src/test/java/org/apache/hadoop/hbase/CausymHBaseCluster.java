@@ -17,7 +17,7 @@
  */
 package org.apache.hadoop.hbase;
 
-import edu.uva.liftlab.graphchecker.runtime.MessageDoors;
+import edu.uva.liftlab.causym.runtime.MessageDoors;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -42,7 +42,7 @@ import org.apache.hadoop.hbase.zookeeper.MiniZooKeeperCluster;
 import org.apache.hadoop.hbase.zookeeper.ZKWatcher;
 
 /**
- * What makes an HBase mini cluster a GraphChecker workload, with {@link #AUTOMATIC} set: any
+ * What makes an HBase mini cluster a Causym workload, with {@link #AUTOMATIC} set: any
  * cluster test is one as it is written.
  * <p>
  * The cluster runs on the local filesystem, with no HDFS ({@link #configure}): its root directory
@@ -53,7 +53,7 @@ import org.apache.hadoop.hbase.zookeeper.ZKWatcher;
  * them, so no two runs order them alike. Its servers are named alike in every run: each one's
  * host is {@code localhost} (the recording and a replay run on different machines), its port the
  * next above the ones before and its start code a function of its place among them
- * ({@code CausynthNodes}), so the master's sorted servers, which assignment draws from, are in the
+ * ({@code CausymNodes}), so the master's sorted servers, which assignment draws from, are in the
  * order the nodes were made.
  * <p>
  * Every node is registered whole as the node it is ({@link MessageDoors#registerNode}): each
@@ -76,8 +76,8 @@ import org.apache.hadoop.hbase.zookeeper.ZKWatcher;
  * a JIT and every replay on an interpreter many times slower, so an RPC, a session, an idle
  * connection or a test's own wait that the recording finished in time would time out in a replay.
  */
-public final class CausynthHBaseCluster {
-  public static final String AUTOMATIC = "causynth.cluster.automatic";
+public final class CausymHBaseCluster {
+  public static final String AUTOMATIC = "causym.cluster.automatic";
   /** HBase's own write-ahead log that writes nothing (package-private: named by its class). */
   private static final String NO_WAL = "org.apache.hadoop.hbase.wal.DisabledWALProvider";
   /** Every server's host: one machine, whichever runs the recording or a replay. */
@@ -101,7 +101,7 @@ public final class CausynthHBaseCluster {
   private static Object windowClient;
   private static long windowRequest;
 
-  private CausynthHBaseCluster() {
+  private CausymHBaseCluster() {
   }
 
   public static boolean automatic() {

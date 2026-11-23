@@ -46,7 +46,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * GraphChecker workload of hbase-bugs-master-active-time (bug_study HBase #14): a master failover
+ * Causym workload of hbase-bugs-master-active-time (bug_study HBase #14): a master failover
  * while a region opens. The active master dispatches the region's open with its active time; the
  * region server holds the open while that master stops cleanly (its procedure store flushed, its
  * RPC server down) and a new master starts, becomes active and initializes, then reports OPENED,
@@ -58,7 +58,7 @@ import org.junit.jupiter.api.Test;
  */
 @Tag(MasterTests.TAG)
 @Tag(MediumTests.TAG)
-public class TestCausynthMasterActiveTime {
+public class TestCausymMasterActiveTime {
 
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
 

@@ -39,7 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * GraphChecker workload of hbase-adhoc-04 (AbstractStateMachineTableProcedure :163, a table
+ * Causym workload of hbase-adhoc-04 (AbstractStateMachineTableProcedure :163, a table
  * procedure's check that its table is enabled) that holds HBASE-30484: the quota observer moves a
  * table disabled by a DISABLE space-quota violation out of violation by writing the new snapshot to
  * hbase:quota, advancing its in-memory snapshot, and only then enabling the table. The test drives
@@ -51,9 +51,9 @@ import org.slf4j.LoggerFactory;
  * skip the enable, so the table stays disabled and the flush is refused at :163.
  */
 @Tag(MediumTests.TAG)
-public class TestCausynthQuotaEnableAfterAdvance {
+public class TestCausymQuotaEnableAfterAdvance {
   private static final Logger LOG =
-    LoggerFactory.getLogger(TestCausynthQuotaEnableAfterAdvance.class);
+    LoggerFactory.getLogger(TestCausymQuotaEnableAfterAdvance.class);
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
 
   @BeforeAll
@@ -74,7 +74,7 @@ public class TestCausynthQuotaEnableAfterAdvance {
 
   @Test
   public void enableAfterTheSnapshotAdvanced() throws Exception {
-    TableName table = TableName.valueOf("causynth_quota_disable");
+    TableName table = TableName.valueOf("causym_quota_disable");
     Admin admin = UTIL.getAdmin();
     admin.createTable(TableDescriptorBuilder.newBuilder(table)
       .setColumnFamily(ColumnFamilyDescriptorBuilder.of("f")).build());
