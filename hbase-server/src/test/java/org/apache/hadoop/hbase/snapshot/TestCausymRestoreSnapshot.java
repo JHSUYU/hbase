@@ -36,14 +36,14 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * GraphChecker's hbase-adhoc-07 workload (scope cut, owner 2026-10-20): the first restore of
+ * Causym's hbase-adhoc-07 workload (scope cut, owner 2026-10-20): the first restore of
  * {@link TestRestoreFlushSnapshotFromClient#testRestoreSnapshot} alone, under the same configuration
  * -- one region server, a one-region table of 10 rows, one FLUSH snapshot, then disable, restore
  * (the check: {@code SnapshotManager#restoreSnapshot}'s table-state guard), enable and the row count.
  */
 @Tag(RegionServerTests.TAG)
 @Tag(MediumTests.TAG)
-public class TestCausynthRestoreSnapshot {
+public class TestCausymRestoreSnapshot {
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
   private static final byte[] FAMILY = Bytes.toBytes("cf");
   private static final int ROWS = 10;
@@ -68,8 +68,8 @@ public class TestCausynthRestoreSnapshot {
 
   @Test
   public void restoreAFlushSnapshot() throws Exception {
-    TableName tableName = TableName.valueOf("causynth_restore");
-    String snapshot = "causynth_restore_snapshot";
+    TableName tableName = TableName.valueOf("causym_restore");
+    String snapshot = "causym_restore_snapshot";
     Admin admin = UTIL.getAdmin();
     try (Table table = UTIL.createTable(tableName, FAMILY)) {
       for (int row = 0; row < ROWS; row++) {

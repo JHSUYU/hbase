@@ -39,7 +39,7 @@ public class CreateNamespaceProcedure
   private static final Logger LOG = LoggerFactory.getLogger(CreateNamespaceProcedure.class);
 
   /**
-   * GraphChecker test hook, null outside a workload that sets it: a namespace insertion that failed
+   * Causym test hook, null outside a workload that sets it: a namespace insertion that failed
    * is retried only once the workload counts this latch down, so the workload orders the retry
    * against its own calls. It never delays a first attempt, so a run in which nothing fails runs
    * as it would without it.

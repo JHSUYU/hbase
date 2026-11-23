@@ -160,7 +160,7 @@ import org.apache.hadoop.hbase.security.UserProvider;
 import org.apache.hadoop.hbase.security.access.AbstractReadOnlyController;
 import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.CausynthNodes;
+import org.apache.hadoop.hbase.util.CausymNodes;
 import org.apache.hadoop.hbase.util.CompressionTest;
 import org.apache.hadoop.hbase.util.ConfigurationUtil;
 import org.apache.hadoop.hbase.util.CoprocessorConfigurationUtil;
@@ -852,7 +852,7 @@ public class HRegionServer extends HBaseServerBase<RSRpcServices>
             new RetryCounterFactory(Integer.MAX_VALUE, this.sleeper.getPeriod(), 1000 * 60 * 5);
           RetryCounter rc = rcf.create();
           while (keepLooping()) {
-            CausynthNodes.awaitRegistration(conf);
+            CausymNodes.awaitRegistration(conf);
             RegionServerStartupResponse w = reportForDuty();
             if (w == null) {
               long sleepTime = rc.getBackoffTimeAndIncrementAttempts();
@@ -1082,7 +1082,7 @@ public class HRegionServer extends HBaseServerBase<RSRpcServices>
 
   @InterfaceAudience.Private
   /**
-   * GraphChecker, automatic mode: the active master this server last sent its load report to. A
+   * Causym, automatic mode: the active master this server last sent its load report to. A
    * region server reports for duty and its first load to each active master, then sends no
    * periodic report: a later report carries only load, which no chore or balancer reads in an
    * automatic cluster, and its periodic turns were the most frequent events no replay order holds.
@@ -1098,7 +1098,7 @@ public class HRegionServer extends HBaseServerBase<RSRpcServices>
     }
     ServerName activeMaster = masterAddressTracker.getMasterAddress();
     if (
-      CausynthNodes.automatic() && activeMaster != null && activeMaster.equals(loadReportedTo)
+      CausymNodes.automatic() && activeMaster != null && activeMaster.equals(loadReportedTo)
     ) {
       return;
     }
@@ -1110,7 +1110,7 @@ public class HRegionServer extends HBaseServerBase<RSRpcServices>
       request.setLoad(sl);
       rss.regionServerReport(null, request.build());
       loadReportedTo = activeMaster;
-      CausynthNodes.reported(conf);
+      CausymNodes.reported(conf);
       span.setStatus(StatusCode.OK);
     } catch (ServiceException se) {
       IOException ioe = ProtobufUtil.getRemoteException(se);

@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hbase.CausynthHBaseCluster;
+import org.apache.hadoop.hbase.CausymHBaseCluster;
 import org.apache.hadoop.hbase.HBaseTestingUtil;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Put;
@@ -56,7 +56,7 @@ public class TestFlushTableProcedureBase {
     final byte[][] splitKeys = new RegionSplitter.HexStringSplit().split(10);
     Table table =
       TEST_UTIL.createTable(TABLE_NAME, new byte[][] { FAMILY1, FAMILY2, FAMILY3 }, splitKeys);
-    if (CausynthHBaseCluster.automatic()) {
+    if (CausymHBaseCluster.automatic()) {
       loadAFewRows(table);
     } else {
       TEST_UTIL.loadTable(table, FAMILY1, false);
@@ -66,7 +66,7 @@ public class TestFlushTableProcedureBase {
   }
 
   /**
-   * GraphChecker's automatic mode: a few rows in every family, each in a region of its own, in
+   * Causym's automatic mode: a few rows in every family, each in a region of its own, in
    * place of the 17576 rows {@code loadTable} writes per family -- the flush's checks need only a
    * memstore that is not empty, and three full loads in the recording window made every replay of
    * hbase-adhoc-24 run past its bound (NZ2-24: its seed replay 85 minutes, every fault replay over

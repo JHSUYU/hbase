@@ -62,7 +62,7 @@ import org.apache.hadoop.hbase.procedure2.Procedure;
 import org.apache.hadoop.hbase.procedure2.util.StringUtils;
 import org.apache.hadoop.hbase.replication.ReplicationBarrierFamilyFormat;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.CausynthNodes;
+import org.apache.hadoop.hbase.util.CausymNodes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FutureUtils;
 import org.apache.hadoop.hbase.wal.WALSplitUtil;
@@ -96,7 +96,7 @@ public class RegionStateStore {
   private final MasterRegion masterRegion;
 
   /**
-   * GraphChecker, automatic mode: the encoded names of the regions whose hbase:meta row holds
+   * Causym, automatic mode: the encoded names of the regions whose hbase:meta row holds
    * 'info:merge*' qualifiers. A row's cells reach the master through the meta region's store and
    * a Get, which no tracked value carries; this map is one the engine tracks, written exactly where
    * this store writes the qualifiers (mergeRegions) and removes them (deleteMergeQualifiers, or the
@@ -470,7 +470,7 @@ public class RegionStateStore {
       ReplicationBarrierFamilyFormat.addReplicationParent(putOfMerged, replicationParents);
     }
     multiMutate(child, mutations);
-    if (CausynthNodes.automatic()) {
+    if (CausymNodes.automatic()) {
       for (RegionInfo ri : parents) {
         mergeQualified.remove(ri.getEncodedName());
       }
@@ -482,7 +482,7 @@ public class RegionStateStore {
    * Check whether the given {@code region} has any 'info:merge*' columns.
    */
   public boolean hasMergeRegions(RegionInfo region) throws IOException {
-    if (CausynthNodes.automatic()) {
+    if (CausymNodes.automatic()) {
       return mergeQualified.containsKey(region.getEncodedName());
     }
     return CatalogFamilyFormat.hasMergeRegions(getRegionCatalogResult(region).rawCells());
@@ -528,7 +528,7 @@ public class RegionStateStore {
     try (Table table = master.getConnection().getTable(TableName.META_TABLE_NAME)) {
       table.delete(delete);
     }
-    if (CausynthNodes.automatic()) {
+    if (CausymNodes.automatic()) {
       mergeQualified.remove(mergeRegion.getEncodedName());
     }
     LOG.info(
@@ -583,7 +583,7 @@ public class RegionStateStore {
       debugLogMutations(deletes);
       table.delete(deletes);
     }
-    if (CausynthNodes.automatic()) {
+    if (CausymNodes.automatic()) {
       for (RegionInfo hri : regions) {
         mergeQualified.remove(hri.getEncodedName());
       }
