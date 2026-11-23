@@ -24,9 +24,9 @@ import org.apache.yetus.audience.InterfaceAudience;
  */
 @InterfaceAudience.Private
 public class DefaultEnvironmentEdge implements EnvironmentEdge {
-  private static final boolean AUTOMATIC = Boolean.getBoolean("causynth.cluster.automatic");
+  private static final boolean AUTOMATIC = Boolean.getBoolean("causym.cluster.automatic");
 
-  /** Returns whether GraphChecker's automatic mode ({@code causynth.cluster.automatic}) is on. */
+  /** Returns whether Causym's automatic mode ({@code causym.cluster.automatic}) is on. */
   public static boolean automatic() {
     return AUTOMATIC;
   }

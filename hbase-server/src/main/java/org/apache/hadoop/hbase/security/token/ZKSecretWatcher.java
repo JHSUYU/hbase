@@ -110,7 +110,7 @@ public class ZKSecretWatcher extends ZKListener {
 
         AuthenticationKey key =
           (AuthenticationKey) Writables.getWritable(data, new AuthenticationKey());
-        RecoverableZooKeeper.causynthDecoded(data, key);
+        RecoverableZooKeeper.causymDecoded(data, key);
         seenKeys.put(key.getKeyId(), key);
         secretManager.addKey(key);
       } catch (KeeperException ke) {
@@ -154,7 +154,7 @@ public class ZKSecretWatcher extends ZKListener {
         }
         AuthenticationKey key =
           (AuthenticationKey) Writables.getWritable(data, new AuthenticationKey());
-        RecoverableZooKeeper.causynthDecoded(data, key);
+        RecoverableZooKeeper.causymDecoded(data, key);
         seenKeys.put(key.getKeyId(), key);
         secretManager.addKey(key);
       } catch (IOException ioe) {

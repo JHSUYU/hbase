@@ -25,7 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * A procedure's step as GraphChecker work (with {@code causynth.cluster.automatic} set), its start
+ * A procedure's step as Causym work (with {@code causym.cluster.automatic} set), its start
  * filed at each {@code HANDS.execute}. The first step is handed off where the procedure is first
  * made runnable ({@link AbstractProcedureScheduler#push}):
  * the request that submitted it, or the parent step that added it as a child. Every later step is
@@ -43,11 +43,11 @@ import org.slf4j.LoggerFactory;
  * catalog janitor's collection still holding the region's lock, and its check ran a step later).
  */
 @InterfaceAudience.Private
-final class CausynthStep implements Runnable {
-  private static final Logger LOG = LoggerFactory.getLogger(CausynthStep.class);
-  private static final boolean AUTOMATIC = Boolean.getBoolean("causynth.cluster.automatic");
-  private static final CausynthStep RUNNING = new CausynthStep();
-  private static final CausynthStep FINISHED = new CausynthStep();
+final class CausymStep implements Runnable {
+  private static final Logger LOG = LoggerFactory.getLogger(CausymStep.class);
+  private static final boolean AUTOMATIC = Boolean.getBoolean("causym.cluster.automatic");
+  private static final CausymStep RUNNING = new CausymStep();
+  private static final CausymStep FINISHED = new CausymStep();
   private static final ThreadPoolExecutor HANDS =
     new ThreadPoolExecutor(0, 1, 1, TimeUnit.SECONDS, new SynchronousQueue<>()) {
       @Override
@@ -57,7 +57,7 @@ final class CausynthStep implements Runnable {
   private Procedure<?> procedure;
   private Runnable body;
 
-  private CausynthStep() {
+  private CausymStep() {
   }
 
   /** The procedure is made runnable on this thread: its first step is handed off from here. */
@@ -65,13 +65,13 @@ final class CausynthStep implements Runnable {
     if (!AUTOMATIC) {
       return;
     }
-    CausynthStep step;
-    synchronized (CausynthStep.class) {
-      if (procedure.causynthStep != null) {
+    CausymStep step;
+    synchronized (CausymStep.class) {
+      if (procedure.causymStep != null) {
         return;
       }
-      step = new CausynthStep();
-      procedure.causynthStep = step;
+      step = new CausymStep();
+      procedure.causymStep = step;
     }
     HANDS.execute(step);
   }
@@ -81,11 +81,11 @@ final class CausynthStep implements Runnable {
    * leaves the procedure unfinished hands off the next one.
    */
   static void run(Procedure<?> procedure, Runnable body) {
-    CausynthStep step;
-    synchronized (CausynthStep.class) {
-      step = procedure.causynthStep;
+    CausymStep step;
+    synchronized (CausymStep.class) {
+      step = procedure.causymStep;
       if (step != null && step != RUNNING) {
-        procedure.causynthStep = RUNNING;
+        procedure.causymStep = RUNNING;
       }
     }
     if (step == null || step == RUNNING) {
@@ -100,8 +100,8 @@ final class CausynthStep implements Runnable {
     step.run();
   }
 
-  private static void unclaimed(Procedure<?> procedure, CausynthStep step) {
-    LOG.warn("CAUSYNTH LINEAGE_LOST: a step of {} ran with {} hand-off, on its worker's own context",
+  private static void unclaimed(Procedure<?> procedure, CausymStep step) {
+    LOG.warn("CAUSYM LINEAGE_LOST: a step of {} ran with {} hand-off, on its worker's own context",
       procedure, step == null ? "no" : "a running");
   }
 
@@ -111,13 +111,13 @@ final class CausynthStep implements Runnable {
       body.run();
     } finally {
       boolean finished = procedure.isFinished();
-      CausynthStep next = null;
-      synchronized (CausynthStep.class) {
+      CausymStep next = null;
+      synchronized (CausymStep.class) {
         if (finished) {
-          procedure.causynthStep = null;
+          procedure.causymStep = null;
         } else {
-          next = new CausynthStep();
-          procedure.causynthStep = next;
+          next = new CausymStep();
+          procedure.causymStep = next;
         }
       }
       if (next != null) {

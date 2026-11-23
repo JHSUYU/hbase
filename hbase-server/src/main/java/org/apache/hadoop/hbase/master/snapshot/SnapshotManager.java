@@ -1048,7 +1048,7 @@ public class SnapshotManager extends MasterProcedureManager implements Stoppable
       restoredState = null;
     }
     if (restoredState != null && restoredState.getState() == TableState.State.ENABLED) {
-      throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-07") UnsupportedOperationException("Table '" + TableName.valueOf(snapshot.getTable())
+      throw new @edu.uva.liftlab.causym.annotation.CausymExceptionTarget("hbase-adhoc-07") UnsupportedOperationException("Table '" + TableName.valueOf(snapshot.getTable())
         + "' must be disabled in order to " + "perform a restore operation.");
     }
 
