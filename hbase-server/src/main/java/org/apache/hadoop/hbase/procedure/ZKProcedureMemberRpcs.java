@@ -154,7 +154,7 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
     LOG.debug("Looking for new procedures under znode:'" + zkController.getAcquiredBarrier() + "'");
     List<String> runningProcedures = null;
     try {
-      runningProcedures = causynthListed(ZKUtil.listChildrenAndWatchForNewChildren(
+      runningProcedures = causymListed(ZKUtil.listChildrenAndWatchForNewChildren(
         zkController.getWatcher(), zkController.getAcquiredBarrier()));
       if (runningProcedures == null) {
         LOG.debug("No running procedures.");
@@ -207,7 +207,7 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
           "Data in for starting procedure " + opName + " is illegally formatted (no pb magic). "
             + "Killing the procedure: " + Bytes.toString(data);
         LOG.error(msg);
-        throw new @edu.uva.liftlab.graphchecker.annotation.CausynthExceptionTarget("hbase-adhoc-24") IllegalArgumentException(msg);
+        throw new @edu.uva.liftlab.causym.annotation.CausymExceptionTarget("hbase-adhoc-24") IllegalArgumentException(msg);
       }
       LOG.debug("start proc data length is " + data.length);
       data = Arrays.copyOfRange(data, ProtobufUtil.lengthOfPBMagic(), data.length);
@@ -367,13 +367,13 @@ public class ZKProcedureMemberRpcs implements ProcedureMemberRpcs {
   }
 
   /**
-   * GraphChecker: a member's procedure callback stands on the acquired barrier's create it listed
-   * (RecoverableZooKeeper#causynthChildren), so the barrier's data read is a read of that work and
+   * Causym: a member's procedure callback stands on the acquired barrier's create it listed
+   * (RecoverableZooKeeper#causymChildren), so the barrier's data read is a read of that work and
    * names the version it found, a node or the node's tombstone.
    */
-  private List<String> causynthListed(List<String> procedures) {
+  private List<String> causymListed(List<String> procedures) {
     zkController.getWatcher().getRecoverableZooKeeper()
-      .causynthChildren(zkController.getAcquiredBarrier(), procedures);
+      .causymChildren(zkController.getAcquiredBarrier(), procedures);
     return procedures;
   }
 }

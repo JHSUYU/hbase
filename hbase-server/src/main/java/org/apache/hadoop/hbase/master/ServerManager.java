@@ -60,7 +60,7 @@ import org.apache.hadoop.hbase.master.procedure.ServerCrashProcedure;
 import org.apache.hadoop.hbase.monitoring.MonitoredTask;
 import org.apache.hadoop.hbase.procedure2.Procedure;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.CausynthNodes;
+import org.apache.hadoop.hbase.util.CausymNodes;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.FutureUtils;
@@ -1066,10 +1066,10 @@ public class ServerManager implements ConfigurationObserver {
     destServers.removeAll(drainingServersCopy);
 
     List<ServerName> destinations = new ArrayList<>(destServers);
-    // GraphChecker's automatic cluster: the servers in their order, not the hash set's (a
+    // Causym's automatic cluster: the servers in their order, not the hash set's (a
     // ServerName's hash spells its port, a free one in each run), so a placement is the same in
-    // every run (CausynthNodes).
-    if (CausynthNodes.automatic()) {
+    // every run (CausymNodes).
+    if (CausymNodes.automatic()) {
       Collections.sort(destinations);
     }
     return destinations;
