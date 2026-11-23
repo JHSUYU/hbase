@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * GraphChecker workload for HBase bug H2-16 (docs/checks/HBASE.md): one client takes the backup
+ * Causym workload for HBase bug H2-16 (docs/checks/HBASE.md): one client takes the backup
  * system table's exclusive lock and gives it back. Its acquisition is a checkAndMutate sent with no
  * nonce; a reply lost after the region server committed it makes the client's retry meet its own
  * lock, so its first startBackupExclusiveOperation throws ExclusiveOperationException and the lock
@@ -38,7 +38,7 @@ import org.junit.jupiter.api.Test;
  * two workers throw it by contention in every passing run).
  */
 @Tag(MediumTests.TAG)
-public class TestCausynthBackupLockReplyLost {
+public class TestCausymBackupLockReplyLost {
 
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
   private static SingleProcessHBaseCluster cluster;

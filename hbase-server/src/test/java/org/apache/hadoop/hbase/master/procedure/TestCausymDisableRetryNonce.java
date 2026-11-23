@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * GraphChecker workload of hbase-inj-01 (hbase-adhoc-04, AbstractStateMachineTableProcedure:163,
+ * Causym workload of hbase-inj-01 (hbase-adhoc-04, AbstractStateMachineTableProcedure:163,
  * a table procedure's check that its table is enabled), copied from hbase-buggy-20642's: two
  * tables are created and each is disabled once through the client's Admin. With hbase-inj-01
  * injected, the master's DisableTable handler drops the request's nonce, so an attempt the client
@@ -41,7 +41,7 @@ import org.junit.jupiter.api.Test;
  */
 @Tag(MasterTests.TAG)
 @Tag(MediumTests.TAG)
-public class TestCausynthDisableRetryNonce {
+public class TestCausymDisableRetryNonce {
   private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
 
   @BeforeAll
@@ -57,8 +57,8 @@ public class TestCausynthDisableRetryNonce {
   @Test
   public void disableTwoTables() throws Exception {
     Admin admin = UTIL.getAdmin();
-    TableName first = TableName.valueOf("causynth_disable_first");
-    TableName second = TableName.valueOf("causynth_disable_second");
+    TableName first = TableName.valueOf("causym_disable_first");
+    TableName second = TableName.valueOf("causym_disable_second");
     for (TableName table : new TableName[] { first, second }) {
       admin.createTable(TableDescriptorBuilder.newBuilder(table)
         .setColumnFamily(ColumnFamilyDescriptorBuilder.of("f")).build());
