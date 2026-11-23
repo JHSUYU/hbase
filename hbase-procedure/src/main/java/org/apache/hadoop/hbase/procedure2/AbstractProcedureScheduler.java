@@ -119,7 +119,7 @@ public abstract class AbstractProcedureScheduler implements ProcedureScheduler {
   }
 
   protected void push(final Procedure procedure, final boolean addFront, final boolean notify) {
-    CausynthStep.handOff(procedure);
+    CausymStep.handOff(procedure);
     schedLock();
     try {
       enqueue(procedure, addFront);

@@ -178,7 +178,7 @@ public class TestMergeTableRegionsProcedure {
   }
 
   /**
-   * GraphChecker workload (hbase-adhoc-13): a merged region is merged again once the catalog janitor
+   * Causym workload (hbase-adhoc-13): a merged region is merged again once the catalog janitor
    * has collected its parents. The test runs the janitor's scan itself (it submits the collection
    * procedure and returns) and then waits only 3 s, not for the collection, so only time orders the
    * janitor's removal of the merged region's merge qualifiers before the second merge's check of

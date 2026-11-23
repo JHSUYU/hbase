@@ -17,7 +17,7 @@
  */
 package org.apache.hadoop.hbase.ipc;
 
-import edu.uva.liftlab.graphchecker.runtime.MessageDoors;
+import edu.uva.liftlab.causym.runtime.MessageDoors;
 import java.util.concurrent.atomic.AtomicLong;
 import org.apache.yetus.audience.InterfaceAudience;
 
@@ -28,13 +28,13 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.RPCProtos.RequestHeader
 import org.apache.hadoop.hbase.shaded.protobuf.generated.RPCProtos.ResponseHeader;
 
 @InterfaceAudience.Private
-public final class CausynthRpc {
+public final class CausymRpc {
   public static final String TRANSPORT = "HBASE_RPC";
   private static final String ATTEMPT = "1";
   private static final String CORRELATION = "hbase-rpc-";
   private static final AtomicLong CLIENTS = new AtomicLong();
 
-  private CausynthRpc() {
+  private CausymRpc() {
   }
 
   static long nextClient() {
@@ -61,28 +61,28 @@ public final class CausynthRpc {
   }
 
   static void sent(Call call, long client, Object owner) {
-    call.causynthCorrelation = CORRELATION + client + "-" + call.id;
-    call.causynthOwner = owner;
+    call.causymCorrelation = CORRELATION + client + "-" + call.id;
+    call.causymOwner = owner;
     MessageDoors.Outbound outbound = MessageDoors.outboundRequest(TRANSPORT,
-      call.causynthCorrelation, ATTEMPT, owner, null, verb(call.md), call.param);
-    call.causynthTrace = outbound.trace;
-    call.causynthSymbolic = outbound.symbolic;
+      call.causymCorrelation, ATTEMPT, owner, null, verb(call.md), call.param);
+    call.causymTrace = outbound.trace;
+    call.causymSymbolic = outbound.symbolic;
   }
 
   static void header(RequestHeader.Builder header, Call call) {
-    if (!call.causynthTrace.isEmpty() || !call.causynthSymbolic.isEmpty()) {
-      header.setCausynthCorrelation(call.causynthCorrelation);
-      header.setCausynthTrace(call.causynthTrace);
-      header.setCausynthSymbolic(call.causynthSymbolic);
+    if (!call.causymTrace.isEmpty() || !call.causymSymbolic.isEmpty()) {
+      header.setCausymCorrelation(call.causymCorrelation);
+      header.setCausymTrace(call.causymTrace);
+      header.setCausymSymbolic(call.causymSymbolic);
     }
   }
 
   static MessageDoors.Inbound responded(Call call, ResponseHeader header) {
-    if (!header.hasCausynthTrace() && !header.hasCausynthSymbolic()) {
+    if (!header.hasCausymTrace() && !header.hasCausymSymbolic()) {
       return null;
     }
-    return MessageDoors.inbound(header.getCausynthTrace(), header.getCausynthSymbolic(),
-      TRANSPORT, call.causynthCorrelation, ATTEMPT, MessageDoors.RESPONSE, call.causynthOwner,
+    return MessageDoors.inbound(header.getCausymTrace(), header.getCausymSymbolic(),
+      TRANSPORT, call.causymCorrelation, ATTEMPT, MessageDoors.RESPONSE, call.causymOwner,
       false);
   }
 
@@ -90,7 +90,7 @@ public final class CausynthRpc {
     MessageDoors.Inbound served = MessageDoors.current();
     if (
       served != null && MessageDoors.RESPONSE.equals(served.half)
-        && served.correlationId.equals(call.causynthCorrelation)
+        && served.correlationId.equals(call.causymCorrelation)
     ) {
       MessageDoors.parsed(response);
     }
@@ -101,12 +101,12 @@ public final class CausynthRpc {
   }
 
   public static MessageDoors.Inbound serve(RequestHeader header, Message param, Object server) {
-    if (header == null || !header.hasCausynthCorrelation()) {
+    if (header == null || !header.hasCausymCorrelation()) {
       return MessageDoors.inbound(null, null, TRANSPORT, "", ATTEMPT, MessageDoors.REQUEST, server,
         false);
     }
-    MessageDoors.Inbound inbound = MessageDoors.inbound(header.getCausynthTrace(),
-      header.getCausynthSymbolic(), TRANSPORT, header.getCausynthCorrelation(), ATTEMPT,
+    MessageDoors.Inbound inbound = MessageDoors.inbound(header.getCausymTrace(),
+      header.getCausymSymbolic(), TRANSPORT, header.getCausymCorrelation(), ATTEMPT,
       MessageDoors.REQUEST, server, false);
     MessageDoors.parsed(param);
     return inbound;
@@ -118,14 +118,14 @@ public final class CausynthRpc {
 
   public static void respond(ResponseHeader.Builder response, RequestHeader request,
     Object server, Message message) {
-    if (request == null || !request.hasCausynthCorrelation()) {
+    if (request == null || !request.hasCausymCorrelation()) {
       return;
     }
     MessageDoors.Outbound outbound = MessageDoors.outbound(TRANSPORT,
-      request.getCausynthCorrelation(), ATTEMPT, MessageDoors.RESPONSE, server, null, message);
+      request.getCausymCorrelation(), ATTEMPT, MessageDoors.RESPONSE, server, null, message);
     if (outbound.active()) {
-      response.setCausynthTrace(outbound.trace);
-      response.setCausynthSymbolic(outbound.symbolic);
+      response.setCausymTrace(outbound.trace);
+      response.setCausymSymbolic(outbound.symbolic);
     }
   }
 }

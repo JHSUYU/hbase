@@ -139,8 +139,8 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
 
   private final AtomicInteger callIdCnt = new AtomicInteger(0);
 
-  /** This client's number in the JVM, its calls' correlation ids' prefix ({@link CausynthRpc}). */
-  private final long causynthClient = CausynthRpc.nextClient();
+  /** This client's number in the JVM, its calls' correlation ids' prefix ({@link CausymRpc}). */
+  private final long causymClient = CausymRpc.nextClient();
 
   private final ScheduledFuture<?> cleanupIdleConnectionTask;
 
@@ -412,7 +412,7 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
   private Call callMethod(final Descriptors.MethodDescriptor md, final HBaseRpcController hrc,
     final Message param, Message returnType, final User ticket, final Address addr,
     final RpcCallback<Message> callback) {
-    long causynth = CausynthRpc.starting(md);
+    long causym = CausymRpc.starting(md);
     Span span = new IpcClientSpanBuilder().setMethodDescriptor(md).setRemoteAddress(addr).build();
     try (Scope scope = span.makeCurrent()) {
       final MetricsConnection.CallStats cs = MetricsConnection.newCallStats();
@@ -455,7 +455,7 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
         }
         cs.setConcurrentCallsPerServer(count);
         T connection = getConnection(remoteId);
-        CausynthRpc.sent(call, causynthClient, this);
+        CausymRpc.sent(call, causymClient, this);
         connection.sendRequest(call, hrc);
       } catch (Exception e) {
         call.setException(toIOE(e));
@@ -463,7 +463,7 @@ public abstract class AbstractRpcClient<T extends RpcConnection> implements RpcC
       }
       return call;
     } finally {
-      CausynthRpc.ended(causynth);
+      CausymRpc.ended(causym);
     }
   }
 

@@ -255,7 +255,7 @@ import org.apache.hadoop.hbase.security.access.AbstractReadOnlyController;
 import org.apache.hadoop.hbase.trace.TraceUtil;
 import org.apache.hadoop.hbase.util.Addressing;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.CausynthNodes;
+import org.apache.hadoop.hbase.util.CausymNodes;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.ConfigurationUtil;
 import org.apache.hadoop.hbase.util.CoprocessorConfigurationUtil;
@@ -452,17 +452,17 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
   private final boolean preLoadTableDescriptors;
 
   /**
-   * GraphChecker (hbase-bugs-master-active-time): in automatic mode a master's active time is its
+   * Causym (hbase-bugs-master-active-time): in automatic mode a master's active time is its
    * start code (a run constant, 1700000000000 + 1000 x creation order) plus the skew of its clock
    * read at activation (milliseconds, 0 unless set) from this key suffixed ".first" for the first
    * node made and ".later" for any other: the clock skew the bug needs, one configuration root per
    * key, so every run's active times are the same and only a chosen skew moves a master's. The
    * keys are constants because the engine names a configuration root only by a constant key.
    */
-  public static final String CAUSYNTH_CLOCK_SKEW = "causynth.hbase.master.clock.skew.ms";
+  public static final String CAUSYM_CLOCK_SKEW = "causym.hbase.master.clock.skew.ms";
 
   // Time stamps for when a hmaster became active
-  // GraphChecker (hbase-bugs-master-active-time): in automatic mode a master not yet active reads
+  // Causym (hbase-bugs-master-active-time): in automatic mode a master not yet active reads
   // as later than any report (Long.MAX_VALUE). Every report checks the volatile serviceStarted
   // before it reads this field, so no report reads that value; the engine does not see that
   // happens-before and pairs the check with the value the master had after construction
@@ -1000,9 +1000,9 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
     startupTaskGroup.addTask("Initializing Master file system");
 
     this.masterActiveTime = DefaultEnvironmentEdge.automatic()
-      ? startcode + (startcode == CausynthNodes.FIRST_STARTCODE
-        ? conf.getLong(CAUSYNTH_CLOCK_SKEW + ".first", 0)
-        : conf.getLong(CAUSYNTH_CLOCK_SKEW + ".later", 0))
+      ? startcode + (startcode == CausymNodes.FIRST_STARTCODE
+        ? conf.getLong(CAUSYM_CLOCK_SKEW + ".first", 0)
+        : conf.getLong(CAUSYM_CLOCK_SKEW + ".later", 0))
       : EnvironmentEdgeManager.currentTime();
     // TODO: Do this using Dependency Injection, using PicoContainer, Guice or Spring.
 

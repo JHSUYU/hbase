@@ -32,7 +32,7 @@ import org.apache.hadoop.hbase.regionserver.snapshot.RegionServerSnapshotManager
 import org.apache.hadoop.hbase.testclassification.LargeTests;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.CausynthNodes;
+import org.apache.hadoop.hbase.util.CausymNodes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -115,7 +115,7 @@ public class TestRestoreFlushSnapshotFromClient {
 
     // create Table and disable it
     createTable();
-    int rows = CausynthNodes.automatic() ? 8 : 500;
+    int rows = CausymNodes.automatic() ? 8 : 500;
     SnapshotTestingUtils.loadData(UTIL, tableName, rows, FAMILY);
     Table table = UTIL.getConnection().getTable(tableName);
     snapshot0Rows = countRows(table);
